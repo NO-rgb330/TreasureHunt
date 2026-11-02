@@ -192,6 +192,12 @@ window.APP = window.APP || {};
     // Student
     'student.home':         { view: 'renderStudentHome',      requiresRole: 'student' },
     'student.scan':         { view: 'renderStudentScan',      requiresRole: 'student' },
+    // Sub-route (NOT in student NAV): reached via
+    //   ctx.navigate('student.quiz', { challengeId })
+    // from the QR scanner (after a successful token lookup)
+    // and from hunt cards ("Continue" / "Start" button).
+    // Rendered by quizzes.js.
+    'student.quiz':         { view: 'renderStudentQuiz',      requiresRole: 'student' },
     'student.hunts':        { view: 'renderStudentHunts',     requiresRole: 'student' },
     'student.progress':     { view: 'renderStudentProgress',  requiresRole: 'student' },
     'student.leaderboard':  { view: 'renderStudentLeaderboard', requiresRole: 'student' },
