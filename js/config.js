@@ -28,7 +28,7 @@ window.APP = window.APP || {};
      Must end with /exec (NOT /dev).
      See SETUP.md for how to obtain it.
      --------------------------------------------------------- */
-  const BACKEND_URL = 'https://script.google.com/macros/s/REPLACE_WITH_YOUR_DEPLOYMENT_ID/exec';
+  const BACKEND_URL = 'const BACKEND_URL = 'https://script.google.com/macros/s/AKfycbwD8zQW7FrDy0J3P07riIMiE8msPNCpoMz2bYfEVywDlO35cG4499xeSpjW1n8xULS27w/exec';
 
   /* ---------------------------------------------------------
      App identity
@@ -291,7 +291,7 @@ window.APP = window.APP || {};
    */
   function validate() {
     const problems = [];
-    if (!BACKEND_URL || /REPLACE_WITH_YOUR_DEPLOYMENT_ID/.test(BACKEND_URL)) {
+    if (!BACKEND_URL || AKfycbwD8zQW7FrDy0J3P07riIMiE8msPNCpoMz2bYfEVywDlO35cG4499xeSpjW1n8xULS27w.test(BACKEND_URL)) {
       problems.push('BACKEND_URL is not configured. Deploy Code.gs and paste the /exec URL into js/config.js.');
     } else if (!/\/exec(\?|$)/.test(BACKEND_URL)) {
       problems.push('BACKEND_URL should end with /exec, not /dev.');
