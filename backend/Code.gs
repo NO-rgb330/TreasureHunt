@@ -1005,8 +1005,11 @@ function teacherCreateChallenge_(payload, session) {
 
 function teacherUpdateChallenge_(payload, session) {
   const updates = {};
-  ['name','description','quizId','formUrl','startDate','endDate','status'].forEach(k => {
-    if (payload[k] !== undefined) updates[k[0].toUpperCase() + k.slice(1)] = payload[k];
+  ['name','description','startDate','endDate','status'].forEach(k => {
+  if (payload[k] !== undefined) updates[k[0].toUpperCase() + k.slice(1)] = payload[k];
+});
+if (payload.quizId  !== undefined) updates.QuizID  = payload.quizId;
+if (payload.formUrl !== undefined) updates.FormURL = payload.formUrl;
   });
   if (payload.maxPoints !== undefined) updates.MaxPoints = Number(payload.maxPoints);
   if (payload.passingPercent !== undefined) updates.PassingPercent = Number(payload.passingPercent);
