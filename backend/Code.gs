@@ -138,6 +138,7 @@ function route_(action, payload, session) {
     case 'teacher.getStudents': return teacher_(session, 'teacher', teacherGetStudents_, [payload, session]);
     case 'teacher.getStudentReport': return teacher_(session, 'teacher', teacherGetStudentReport_, [payload, session]);
     case 'teacher.getReports': return teacher_(session, 'teacher', teacherGetReports_, [payload, session]);
+    case 'teacher.getSubmissions': return teacher_(session, 'teacher', teacherGetSubmissions_, [payload, session]);
     case 'teacher.getAudit': return teacher_(session, 'teacher', teacherGetAudit_, [payload, session]);
     case 'teacher.getClasses': return teacher_(session, 'teacher', teacherGetClasses_, []);
 
@@ -598,11 +599,39 @@ function getChallengeByToken_(payload, session) {
   };
 }
 
+/**
+ * getQuizForStudent_
+ *
+ * Defense-in-depth: the scan path (getChallengeByToken_) already validates
+ * challenge/hunt/class/date before a student can reach the quiz route, but
+ * a student could hand-craft a URL with ?challengeId=ch_xxx. Re-validate the
+ * same conditions here so questions are never served for a challenge the
+ * student cannot legitimately attempt.
+ *
+ * Note: correct answers are NEVER returned (only question text and options).
+ * Score computation happens in submitQuiz_ only.
+ */
 function getQuizForStudent_(payload, session) {
   const challengeId = payload.challengeId;
   const challenge = findOne_('Challenges', c => c.ChallengeID === challengeId);
   if (!challenge) throw new Error('Challenge not found');
+  if (String(challenge.Status).toLowerCase() !== 'active') throw new Error('This challenge is not active.');
+  if (!inRange_(challenge.StartDate, challenge.EndDate)) throw new Error('This challenge is not available right now.');
   if (!challenge.QuizID) throw new Error('No built-in quiz on this challenge.');
+
+  // Validate hunt + student access (mirrors submitQuiz_ checks)
+  const hunt = findOne_('TreasureHunts', h => h.HuntID === challenge.HuntID);
+  if (!hunt) throw new Error('Associated hunt not found.');
+  if (!truthy_(hunt.Published)) throw new Error('This hunt has not been published yet.');
+
+  if (session.role === 'student') {
+    const student = findOne_('Students', r => r.StudentID === session.userId);
+    if (!student) throw new Error('Student not found');
+    if (String(student.Status).toLowerCase() !== 'active') throw new Error('Account inactive');
+    if (!classAllowed_(hunt.AssignedClassIDs, student.ClassID)) throw new Error('This hunt is not available to your class.');
+    if (!classAllowed_(challenge.AssignedClassIDs, student.ClassID)) throw new Error('This challenge is not available to your class.');
+  }
+
   const quiz = findOne_('Quizzes', q => q.QuizID === challenge.QuizID);
   if (!quiz) throw new Error('Quiz not found');
   const questions = findMany_('Questions', q => q.QuizID === quiz.QuizID)
@@ -939,6 +968,8 @@ function teacherCreateHunt_(payload, session) {
 }
 
 function teacherUpdateHunt_(payload, session) {
+  // Note: k[0].toUpperCase() + k.slice(1) works for all of these keys
+  // because the corresponding sheet headers are strictly PascalCase.
   const updates = {};
   ['name','description','instructions','startDate','endDate','status'].forEach(k => {
     if (payload[k] !== undefined) updates[k[0].toUpperCase() + k.slice(1)] = payload[k];
@@ -1005,12 +1036,14 @@ function teacherCreateChallenge_(payload, session) {
 
 function teacherUpdateChallenge_(payload, session) {
   const updates = {};
+  // NOTE: k[0].toUpperCase() + k.slice(1) is only correct for headers that
+  // follow strict PascalCase (Name, Description, StartDate, EndDate, Status).
+  // QuizID and FormURL use ID/URL in caps, so they are handled explicitly below.
   ['name','description','startDate','endDate','status'].forEach(k => {
-  if (payload[k] !== undefined) updates[k[0].toUpperCase() + k.slice(1)] = payload[k];
-});
-if (payload.quizId  !== undefined) updates.QuizID  = payload.quizId;
-if (payload.formUrl !== undefined) updates.FormURL = payload.formUrl;
+    if (payload[k] !== undefined) updates[k[0].toUpperCase() + k.slice(1)] = payload[k];
   });
+  if (payload.quizId  !== undefined) updates.QuizID  = payload.quizId;
+  if (payload.formUrl !== undefined) updates.FormURL = payload.formUrl;
   if (payload.maxPoints !== undefined) updates.MaxPoints = Number(payload.maxPoints);
   if (payload.passingPercent !== undefined) updates.PassingPercent = Number(payload.passingPercent);
   if (payload.orderIndex !== undefined) updates.OrderIndex = Number(payload.orderIndex);
@@ -1231,6 +1264,141 @@ function teacherGetReports_(payload, session) {
       totalPoints: totalPoints,
       averagePoints: filteredStudents.length ? Math.round(totalPoints / filteredStudents.length) : 0
     }
+  };
+}
+
+/**
+ * teacher.getSubmissions
+ *
+ * Read-only list of quiz submissions visible to the calling teacher.
+ *
+ * Params:
+ *   classId  – '' | specific class ID (admins may target any class;
+ *              teachers are automatically scoped to their own classes)
+ *   huntId   – '' | only submissions for challenges in this hunt
+ *   status   – 'all' | 'passed' | 'failed' | 'pending'
+ *              (pending = GradingStatus !== 'graded'; useful once a
+ *               Google Forms grading workflow is added)
+ *   limit    – 1..1000 (default 200), most recent first
+ *
+ * Auth:
+ *   - Teachers see only students whose ClassID is in their ClassIDs list.
+ *   - Admins (role === 'admin') see everything; when classId is set,
+ *     the result is filtered to that class only.
+ *
+ * Returns:
+ *   {
+ *     rows: [{
+ *       submissionId, studentId, studentName,
+ *       classId, className,
+ *       challengeId, challengeName, huntName,
+ *       score, maxScore, percent, passed,
+ *       gradingStatus, submittedAt
+ *     }],
+ *     filtered: { classId, huntId, status },
+ *     total: <number of rows returned after limit>
+ *   }
+ *
+ * Security:
+ *   - No answers (AnswersJSON) are returned — only score/pass metadata.
+ *   - No emails or student IDs beyond what the teacher already has in
+ *     teacher.getStudents.
+ */
+function teacherGetSubmissions_(payload, session) {
+  const classId = String(payload.classId || '');
+  const huntId  = String(payload.huntId  || '');
+  const status  = String(payload.status  || 'all').toLowerCase();
+  const limit   = Math.max(1, Math.min(Number(payload.limit) || 200, 1000));
+
+  const isAdmin = session.role === 'admin';
+
+  /* ---- Build the class-allowed student set once ---- */
+  const teacherRow = isAdmin
+    ? null
+    : findOne_('Teachers', r => r.TeacherID === session.userId);
+  const myClasses = isAdmin ? null : new Set(splitIds_(teacherRow ? teacherRow.ClassIDs : ''));
+
+  const allStudents = findMany_('Students', s => String(s.Status).toLowerCase() === 'active');
+  const studentNameMap = {};
+  const studentClassMap = {};
+  const visibleStudentIds = new Set();
+
+  allStudents.forEach(s => {
+    const sid = s.StudentID;
+    const scid = String(s.ClassID || '');
+    if (myClasses !== null && !myClasses.has(scid)) return;
+    if (classId && scid !== classId) return;
+    studentNameMap[sid] = s.DisplayName || 'Student';
+    studentClassMap[sid] = scid;
+    visibleStudentIds.add(sid);
+  });
+
+  /* ---- Resolve hunt → challenge IDs ---- */
+  let allowedChallengeIds = null;
+  if (huntId) {
+    allowedChallengeIds = new Set(
+      findMany_('Challenges', c => c.HuntID === huntId).map(c => c.ChallengeID)
+    );
+  }
+
+  /* ---- Preload name maps (avoids per-row findOne_) ---- */
+  const challengeMap = {};
+  findMany_('Challenges', () => true).forEach(c => {
+    challengeMap[c.ChallengeID] = { name: c.Name || '', huntId: c.HuntID };
+  });
+  const huntMap = {};
+  findMany_('TreasureHunts', () => true).forEach(h => {
+    huntMap[h.HuntID] = h.Name || '';
+  });
+  const classMap = {};
+  findMany_('Classes', () => true).forEach(c => {
+    classMap[c.ClassID] = c.ClassName || '';
+  });
+
+  /* ---- Filter QuizResults ---- */
+  const rows = findMany_('QuizResults', r => {
+    if (!visibleStudentIds.has(r.StudentID)) return false;
+    if (allowedChallengeIds && !allowedChallengeIds.has(r.ChallengeID)) return false;
+
+    const passed = truthy_(r.Passed);
+    const graded = String(r.GradingStatus || '').toLowerCase() === 'graded';
+
+    if (status === 'passed'  && !passed) return false;
+    if (status === 'failed'  &&  passed) return false;
+    if (status === 'pending' &&  graded) return false;
+
+    return true;
+  })
+    .sort((a, b) => new Date(b.SubmittedAt) - new Date(a.SubmittedAt))
+    .slice(0, limit);
+
+  /* ---- Shape the response ---- */
+  return {
+    rows: rows.map(r => {
+      const ch = challengeMap[r.ChallengeID] || { name: '', huntId: '' };
+      const scid = studentClassMap[r.StudentID] || '';
+      const score = Number(r.Score) || 0;
+      const max   = Number(r.MaxScore) || 0;
+      const pct   = max > 0 ? Math.round((score / max) * 100) : 0;
+      return {
+        submissionId: r.SubmissionID,
+        studentId: r.StudentID,
+        studentName: studentNameMap[r.StudentID] || 'Student',
+        classId: scid,
+        className: classMap[scid] || '',
+        challengeId: r.ChallengeID,
+        challengeName: ch.name,
+        huntName: huntMap[ch.huntId] || '',
+        score: score,
+        maxScore: max,
+        percent: pct,
+        passed: truthy_(r.Passed),
+        gradingStatus: String(r.GradingStatus || ''),
+        submittedAt: r.SubmittedAt
+      };
+    }),
+    filtered: { classId: classId, huntId: huntId, status: status },
+    total: rows.length
   };
 }
 
