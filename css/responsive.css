@@ -1,1 +1,466 @@
+/* =========================================================
+   TREASURE HUNT APP — Responsive Stylesheet
+   Breakpoints:
+     <= 1200px  Large tablet / small laptop
+     <= 1024px  Tablet landscape
+     <=  860px  Tablet portrait
+     <=  768px  Mobile — sidebar becomes off-canvas drawer
+     <=  480px  Small phones
+     landscape phones
+   Also includes print rules for QR cards.
 
+   CONTRACT WITH js/app.js:
+     - Opening the mobile menu  : #sidebar.classList.add('open')
+                                  document.body.classList.add('menu-open')
+     - Closing the mobile menu  : #sidebar.classList.remove('open')
+                                  document.body.classList.remove('menu-open')
+   CONTRACT WITH js/qr-generator.js:
+     - Printable QR card uses class .qr-print-card
+     - Anything marked .print-only is visible ONLY when printing
+     - Anything marked .no-print is hidden when printing
+   ========================================================= */
+
+/* ---------- Global fluid safeguards ---------- */
+img, svg, video, canvas, iframe {
+  max-width: 100%;
+}
+
+/* Allow long IDs / tokens / emails to wrap instead of overflowing */
+.user-name,
+.mono,
+td,
+.chip {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+/* =========================================================
+   <= 1200px — tighten the shell a little
+   ========================================================= */
+@media (max-width: 1200px) {
+  :root { --sidebar-w: 224px; }
+
+  .view { padding: 20px; }
+
+  .stat-grid { gap: 12px; }
+  .stat-value { font-size: 1.6rem; }
+}
+
+/* =========================================================
+   <= 1024px — tablet landscape
+   ========================================================= */
+@media (max-width: 1024px) {
+  .stat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
+  .grid-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .grid-3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
+  .badge-grid { grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); }
+
+  .view { padding: 18px; }
+
+  .page-title { font-size: 1.05rem; }
+}
+
+/* =========================================================
+   <= 860px — tablet portrait
+   ========================================================= */
+@media (max-width: 860px) {
+  .grid-2 { grid-template-columns: 1fr; }
+
+  .form-row { grid-template-columns: 1fr; }
+
+  .modal { max-width: 520px; }
+  .modal.wide { max-width: 640px; }
+
+  /* Toolbars wrap into full-width rows */
+  .toolbar { gap: 8px; }
+  .toolbar input,
+  .toolbar select {
+    min-width: 0;
+    flex: 1 1 160px;
+  }
+
+  .leaderboard-filter { gap: 8px; }
+  .leaderboard-filter select { flex: 1 1 150px; }
+
+  .kpi { flex: 1 1 120px; min-width: 0; }
+}
+
+/* =========================================================
+   <= 768px — MOBILE
+   Sidebar becomes an off-canvas drawer.
+   ========================================================= */
+@media (max-width: 768px) {
+
+  /* ---- Show mobile-only controls ---- */
+  .only-mobile { display: inline-flex !important; }
+  #menu-toggle { display: inline-flex !important; }
+
+  /* ---- App shell ---- */
+  .app-shell { display: block; }
+
+  /* ---- Sidebar as fixed drawer ---- */
+  .sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    height: 100vh;
+    width: min(84vw, 300px);
+    transform: translateX(-100%);
+    transition: transform .22s ease;
+    box-shadow: var(--shadow-lg);
+    z-index: 60;
+    will-change: transform;
+  }
+  .sidebar.open { transform: translateX(0); }
+
+  /* Scrim behind the open drawer */
+  body.menu-open { overflow: hidden; }
+  body.menu-open::after {
+    content: "";
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 42, 68, .5);
+    z-index: 50;
+  }
+
+  /* Drawer keeps its own scrolling */
+  .nav { overflow-y: auto; }
+
+  /* ---- Main column takes the full width ---- */
+  .main-wrap { width: 100%; }
+
+  .topbar {
+    padding: 0 14px;
+    gap: 8px;
+    /* Keep topbar fixed so it never scrolls away on small screens */
+    position: sticky;
+    top: 0;
+  }
+
+  .page-title {
+    font-size: 1rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .role-badge { font-size: .66rem; padding: 3px 8px; }
+
+  .view { padding: 14px; }
+
+  /* ---- Grids collapse ---- */
+  .stat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .grid-4,
+  .grid-3,
+  .grid-2 { grid-template-columns: 1fr; }
+
+  .stat-card { padding: 14px; }
+  .stat-value { font-size: 1.45rem; }
+
+  .badge-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
+  /* ---- Tables stay readable, scroll horizontally ---- */
+  .table-wrap {
+    border-radius: var(--radius-sm);
+    -webkit-overflow-scrolling: touch;
+  }
+  thead th,
+  tbody td { padding: 10px 12px; }
+
+  /* ---- Cards ---- */
+  .card-body { padding: 14px; }
+  .card-header { padding: 12px 14px; }
+
+  .hunt-card { padding: 14px; }
+
+  /* ---- Forms ---- */
+  .form-row { grid-template-columns: 1fr; }
+  .form-actions { flex-direction: column-reverse; }
+  .form-actions .btn { width: 100%; }
+
+  /* Comfortable tap targets */
+  .btn { min-height: 42px; }
+  .btn-sm { min-height: 34px; }
+  input[type="text"],
+  input[type="email"],
+  input[type="password"],
+  input[type="number"],
+  input[type="date"],
+  input[type="datetime-local"],
+  input[type="url"],
+  select,
+  textarea {
+    font-size: 16px; /* prevents iOS zoom-on-focus */
+  }
+
+  /* ---- QR scanner ---- */
+  .scanner-wrap { padding: 14px; }
+  .scanner-stage { max-width: 100%; }
+  .manual-code { flex-direction: column; }
+  .manual-code .btn { width: 100%; }
+
+  /* ---- QR generator ---- */
+  .qr-preview-card { padding: 16px; }
+  #qr-canvas-wrap { padding: 12px; }
+
+  /* ---- Quiz ---- */
+  .quiz-header { padding: 14px; }
+  .quiz-question { padding: 14px; }
+  .quiz-option { padding: 12px; }
+
+  /* ---- Toasts ---- */
+  .toast-container {
+    left: 12px;
+    right: 12px;
+    bottom: 12px;
+    max-width: none;
+  }
+  .toast { width: 100%; }
+
+  /* ---- Modal becomes a bottom sheet ---- */
+  .modal-backdrop { align-items: flex-end; padding: 0; }
+  .modal {
+    max-width: 100%;
+    width: 100%;
+    max-height: 92vh;
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  }
+  .modal .modal-footer {
+    position: sticky;
+    bottom: 0;
+    flex-direction: column-reverse;
+  }
+  .modal .modal-footer .btn { width: 100%; }
+
+  /* ---- Tabs scroll nicely ---- */
+  .tabs { gap: 0; }
+  .tab { padding: 10px 12px; font-size: .85rem; }
+
+  /* ---- KPI row ---- */
+  .kpi-row { gap: 10px; }
+  .kpi { flex: 1 1 calc(50% - 10px); padding: 10px 12px; }
+}
+
+/* =========================================================
+   <= 480px — small phones
+   ========================================================= */
+@media (max-width: 480px) {
+
+  .stat-grid { grid-template-columns: 1fr; }
+  .badge-grid { grid-template-columns: 1fr; }
+
+  .view { padding: 12px; }
+
+  .brand-large h1 { font-size: 1.15rem; }
+  .brand-large svg { width: 32px; height: 32px; }
+
+  .login-card {
+    padding: 24px 18px;
+    border-radius: var(--radius);
+  }
+
+  .stat-value { font-size: 1.35rem; }
+
+  .page-title { font-size: .95rem; }
+
+  .card-footer { padding: 10px 12px; }
+
+  .section-title { font-size: .98rem; }
+
+  /* Two-column tables get tighter padding */
+  thead th,
+  tbody td { padding: 9px 10px; font-size: .84rem; }
+
+  /* Rank badge smaller */
+  .rank-badge { width: 24px; height: 24px; font-size: .75rem; }
+
+  .kpi { flex: 1 1 100%; }
+
+  .scanner-overlay::before {
+    width: 72%;
+    height: 72%;
+  }
+}
+
+/* =========================================================
+   Landscape phones (short height)
+   ========================================================= */
+@media (max-height: 480px) and (orientation: landscape) {
+  .sidebar { width: min(70vw, 320px); }
+
+  .scanner-stage {
+    max-width: 46vh;
+    max-height: 46vh;
+    margin-left: auto;
+    margin-right: auto;
+  }
+
+  .modal { max-height: 96vh; }
+  .modal .modal-body { padding: 14px 16px; }
+
+  .fullscreen-center { padding: 12px; }
+  .login-card { max-width: 420px; padding: 18px; }
+}
+
+/* =========================================================
+   Hover-capable devices only
+   (avoids sticky hover states on touch screens)
+   ========================================================= */
+@media (hover: none) {
+  .card.clickable:hover,
+  .hunt-card:hover {
+    transform: none;
+    box-shadow: var(--shadow-sm);
+  }
+}
+
+/* =========================================================
+   Reduced motion
+   ========================================================= */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: .001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* =========================================================
+   High-contrast / forced colors
+   ========================================================= */
+@media (forced-colors: active) {
+  .btn,
+  .card,
+  .nav-item,
+  .quiz-option {
+    border: 1px solid ButtonText;
+  }
+  .progress-bar { background: Highlight; }
+}
+
+/* =========================================================
+   PRINT — QR cards & reports
+   The app chrome is hidden; only .qr-print-card content
+   (or the whole .view for reports) is printed.
+   ========================================================= */
+@media print {
+  @page { margin: 12mm; }
+
+  html, body {
+    background: #fff !important;
+    color: #000 !important;
+    font-size: 11pt;
+  }
+
+  /* Hide everything structural */
+  .sidebar,
+  .topbar,
+  .toast-container,
+  .modal-backdrop,
+  .toolbar,
+  .btn,
+  .no-print,
+  .nav,
+  .sidebar-footer,
+  .icon-btn,
+  #menu-toggle,
+  #sidebar-close,
+  .scanner-wrap,
+  .manual-code,
+  .tabs {
+    display: none !important;
+  }
+
+  .app-shell { display: block !important; }
+  .main-wrap { width: 100% !important; }
+  .view {
+    padding: 0 !important;
+    max-width: none !important;
+    margin: 0 !important;
+  }
+
+  /* Cards: flat, borderless-ish for ink saving */
+  .card,
+  .hunt-card,
+  .quiz-question,
+  .stat-card,
+  .badge-card,
+  .qr-preview-card {
+    box-shadow: none !important;
+    border: 1px solid #999 !important;
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  /* Tables print cleanly */
+  .table-wrap { overflow: visible !important; border: 1px solid #999 !important; }
+  thead th { background: #eee !important; color: #000 !important; }
+  tbody tr:hover { background: transparent !important; }
+
+  /* Show print-only helpers */
+  .print-only { display: block !important; }
+
+  /* ---- Dedicated QR card layout ---- */
+  .qr-print-card {
+    display: block !important;
+    border: 2px solid #000 !important;
+    border-radius: 8px;
+    padding: 16mm 12mm;
+    text-align: center;
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+  .qr-print-card .qr-print-school {
+    font-size: 10pt;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    margin-bottom: 4mm;
+  }
+  .qr-print-card .qr-print-title {
+    font-size: 18pt;
+    font-weight: 700;
+    margin-bottom: 3mm;
+  }
+  .qr-print-card .qr-print-number {
+    font-size: 10pt;
+    color: #333;
+    margin-bottom: 6mm;
+  }
+  .qr-print-card .qr-print-points {
+    font-size: 12pt;
+    font-weight: 700;
+    margin-top: 4mm;
+  }
+  .qr-print-card .qr-print-image,
+  .qr-print-card img,
+  .qr-print-card canvas {
+    width: 70mm !important;
+    height: 70mm !important;
+    max-width: none !important;
+    margin: 0 auto;
+    image-rendering: pixelated;
+    /* Quiet zone is part of the generated QR image itself */
+  }
+  .qr-print-card .qr-print-hint {
+    font-size: 9pt;
+    color: #333;
+    margin-top: 5mm;
+    line-height: 1.35;
+  }
+
+  /* Force background colors to print for badges/progress */
+  .badge,
+  .rank-badge,
+  .progress-bar {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  a[href]::after { content: ""; } /* don't append URLs */
+}
