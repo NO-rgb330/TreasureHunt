@@ -1,19 +1,5 @@
 /* =========================================================
    TREASURE HUNT APP — config.js
-   ---------------------------------------------------------
-   Single source of truth for frontend configuration.
-
-   IMPORTANT: this file contains NO secrets.
-   The only deployment value you must set is BACKEND_URL
-   (the Google Apps Script Web App /exec URL).
-   Everything here is safe to ship to the browser.
-
-   Global namespace:
-     window.APP = window.APP || {};
-     APP.config = { ... }         // this object
-     APP.config.buildChallengeUrl(token)
-     APP.config.tokenLooksValid(token)
-     APP.config.validate()        // logs warnings if unconfigured
    ========================================================= */
 
 window.APP = window.APP || {};
@@ -21,100 +7,55 @@ window.APP = window.APP || {};
 (function () {
   'use strict';
 
-  /* ---------------------------------------------------------
-     BACKEND — set this after deploying Code.gs as a Web App.
-     Format:
-       https://script.google.com/macros/s/AKfycb....../exec
-     Must end with /exec (NOT /dev).
-     See SETUP.md for how to obtain it.
-     --------------------------------------------------------- */
-  const BACKEND_URL = 'const BACKEND_URL = 'https://script.google.com/macros/s/AKfycbwD8zQW7FrDy0J3P07riIMiE8msPNCpoMz2bYfEVywDlO35cG4499xeSpjW1n8xULS27w/exec';
+  const BACKEND_URL = 'https://script.google.com/macros/s/AKfyc...YOUR_ID_HERE.../exec'; // <-- Make sure your full URL is here between the single quotes
 
-  /* ---------------------------------------------------------
-     App identity
-     --------------------------------------------------------- */
   const APP_NAME = 'Treasure Hunt';
   const APP_VERSION = '1.0.0';
-  const SCHOOL_NAME = 'Your School'; // shown on printed QR cards
+  const SCHOOL_NAME = 'Your School'; 
   const EVENT_NAME = 'School Treasure Hunt';
 
-  /* ---------------------------------------------------------
-     Local storage / session keys
-     --------------------------------------------------------- */
   const STORAGE = {
     TOKEN: 'th_token',
     USER: 'th_user',
     LAST_ROUTE: 'th_last_route'
   };
 
-  /* ---------------------------------------------------------
-     Network / polling behaviour
-     --------------------------------------------------------- */
   const NETWORK = {
-    REQUEST_TIMEOUT_MS: 30000,      // hard timeout for any API call
-    RETRY_ATTEMPTS: 2,              // retries for transient failures
-    RETRY_BACKOFF_MS: 800,          // base delay between retries
-    LEADERBOARD_POLL_MS: 30000,     // auto-refresh interval for leaderboard
-    DASHBOARD_POLL_MS: 60000        // dashboard refresh interval
+    REQUEST_TIMEOUT_MS: 30000,
+    RETRY_ATTEMPTS: 2,
+    RETRY_BACKOFF_MS: 800,
+    LEADERBOARD_POLL_MS: 30000,
+    DASHBOARD_POLL_MS: 60000
   };
 
-  /* ---------------------------------------------------------
-     QR codes
-     Format: the QR payload is a front-end URL, not a backend URL.
-     Example:
-       https://school.example/treasure-hunt/?challenge=qr_abc123...
-     The frontend reads ?challenge=<token> on load (after auth)
-     and asks the backend to validate it.
-     --------------------------------------------------------- */
   const QR = {
-    ERROR_CORRECTION_LEVEL: 'H',    // highest = survives printing
-    RENDER_SIZE_PX: 320,            // rendered image size
-    QUIET_ZONE_MODULES: 4,          // spec says leave a quiet zone
-    DARK_COLOR: '#0f2a44',          // navy
+    ERROR_CORRECTION_LEVEL: 'H',
+    RENDER_SIZE_PX: 320,
+    QUIET_ZONE_MODULES: 4,
+    DARK_COLOR: '#0f2a44',
     LIGHT_COLOR: '#ffffff',
     PRINT_CARD_COPIES_DEFAULT: 1
   };
 
-  /* ---------------------------------------------------------
-     Scanner behaviour
-     --------------------------------------------------------- */
   const SCANNER = {
     FPS: 10,
     QRBOX_PX: 240,
     SUPPORTED_FORMATS: ['qr_code'],
-    STOP_DELAY_AFTER_SCAN_MS: 350,  // brief pause before we route
-    // Token format issued by the backend: qr_<32 hex chars>
+    STOP_DELAY_AFTER_SCAN_MS: 350,
     TOKEN_REGEX: /^qr_[a-f0-9]{32}$/i
   };
 
-  /* ---------------------------------------------------------
-     Quiz behaviour (frontend only; scoring is server-side)
-     --------------------------------------------------------- */
   const QUIZ = {
     AUTO_SUBMIT_ON_TIMEOUT: true,
     WARN_SECONDS_REMAINING: 30,
-    // Never trust these client-side; backend enforces real rules:
     DEFAULT_PASSING_PERCENT: 60
   };
 
-  /* ---------------------------------------------------------
-     Leaderboard
-     --------------------------------------------------------- */
   const LEADERBOARD = {
     SCOPES: ['school', 'class', 'hunt'],
     DEFAULT_SCOPE: 'school',
     MAX_ROWS_RENDERED: 200
   };
-
-  /* ---------------------------------------------------------
-     NAVIGATION (from the project spec, verbatim per role)
-     ---------------------------------------------------------
-     Each item:
-       key      – route key (used by app.js / ROUTES)
-       label    – sidebar text
-       title    – topbar page title
-       icon     – short inline SVG path data (see icons below)
-     --------------------------------------------------------- */
 
   const ICONS = {
     home:    'M3 11l9-8 9 8v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z',
@@ -175,28 +116,9 @@ window.APP = window.APP || {};
     admin: 'admin.dashboard'
   };
 
-  /* ---------------------------------------------------------
-     ROUTE TABLE
-     ---------------------------------------------------------
-     Maps every NAV key to the render function that `app.js`
-     will call. Render functions live on APP.views (attached by
-     dashboard.js, qr-scanner.js, leaderboard.js, teacher.js,
-     admin.js, etc.).
-
-     A render function signature:
-       async function render(container, ctx) { ... }
-       - container: HTMLElement (the #view element)
-       - ctx: { user, route, params }
-     --------------------------------------------------------- */
   const ROUTES = {
-    // Student
     'student.home':         { view: 'renderStudentHome',      requiresRole: 'student' },
     'student.scan':         { view: 'renderStudentScan',      requiresRole: 'student' },
-    // Sub-route (NOT in student NAV): reached via
-    //   ctx.navigate('student.quiz', { challengeId })
-    // from the QR scanner (after a successful token lookup)
-    // and from hunt cards ("Continue" / "Start" button).
-    // Rendered by quizzes.js.
     'student.quiz':         { view: 'renderStudentQuiz',      requiresRole: 'student' },
     'student.hunts':        { view: 'renderStudentHunts',     requiresRole: 'student' },
     'student.progress':     { view: 'renderStudentProgress',  requiresRole: 'student' },
@@ -204,7 +126,6 @@ window.APP = window.APP || {};
     'student.achievements': { view: 'renderStudentAchievements', requiresRole: 'student' },
     'student.profile':      { view: 'renderStudentProfile',   requiresRole: 'student' },
 
-    // Teacher
     'teacher.dashboard':    { view: 'renderTeacherDashboard', requiresRole: 'teacher' },
     'teacher.hunts':        { view: 'renderTeacherHunts',     requiresRole: 'teacher' },
     'teacher.challenges':   { view: 'renderTeacherChallenges', requiresRole: 'teacher' },
@@ -216,7 +137,6 @@ window.APP = window.APP || {};
     'teacher.integrations': { view: 'renderTeacherIntegrations', requiresRole: 'teacher' },
     'teacher.settings':     { view: 'renderTeacherSettings',  requiresRole: 'teacher' },
 
-    // Admin
     'admin.dashboard':      { view: 'renderAdminDashboard',   requiresRole: 'admin' },
     'admin.users':          { view: 'renderAdminUsers',       requiresRole: 'admin' },
     'admin.classes':        { view: 'renderAdminClasses',     requiresRole: 'admin' },
@@ -227,27 +147,12 @@ window.APP = window.APP || {};
     'admin.settings':       { view: 'renderAdminSettings',    requiresRole: 'admin' }
   };
 
-  /* ---------------------------------------------------------
-     Helpers
-     --------------------------------------------------------- */
-
-  /**
-   * Build the URL embedded inside a QR code for a challenge token.
-   * This is a FRONTEND URL. The frontend reads ?challenge=<token>
-   * after auth and asks the backend to validate it.
-   * @param {string} token - qr_<hex> from backend
-   * @returns {string}
-   */
   function buildChallengeUrl(token) {
     const base = window.location.origin + window.location.pathname;
     const clean = base.split('?')[0].split('#')[0];
     return clean + '?challenge=' + encodeURIComponent(String(token || ''));
   }
 
-  /**
-   * Read the ?challenge=<token> query param, if present.
-   * @returns {string} token or ''
-   */
   function readChallengeParam() {
     try {
       const params = new URLSearchParams(window.location.search);
@@ -257,9 +162,6 @@ window.APP = window.APP || {};
     }
   }
 
-  /**
-   * Remove ?challenge= from the address bar without reloading.
-   */
   function clearChallengeParam() {
     try {
       const url = new URL(window.location.href);
@@ -268,30 +170,19 @@ window.APP = window.APP || {};
     } catch (e) { /* no-op */ }
   }
 
-  /**
-   * Validate the shape of a QR token client-side (fast fail).
-   * The backend still validates existence/active/availability.
-   */
   function tokenLooksValid(token) {
     return SCANNER.TOKEN_REGEX.test(String(token || '').trim());
   }
 
-  /**
-   * Are we on https:// or localhost? (camera + fetch cookies safety)
-   */
   function isSecureContextOk() {
     return window.isSecureContext === true ||
       location.hostname === 'localhost' ||
       location.hostname === '127.0.0.1';
   }
 
-  /**
-   * Warn in the console if the backend URL has not been configured.
-   * Called by app.js at boot. Never throws.
-   */
   function validate() {
     const problems = [];
-    if (!BACKEND_URL || AKfycbwD8zQW7FrDy0J3P07riIMiE8msPNCpoMz2bYfEVywDlO35cG4499xeSpjW1n8xULS27w.test(BACKEND_URL)) {
+    if (!BACKEND_URL || /REPLACE_WITH_YOUR_DEPLOYMENT_ID/.test(BACKEND_URL)) {
       problems.push('BACKEND_URL is not configured. Deploy Code.gs and paste the /exec URL into js/config.js.');
     } else if (!/\/exec(\?|$)/.test(BACKEND_URL)) {
       problems.push('BACKEND_URL should end with /exec, not /dev.');
@@ -305,9 +196,6 @@ window.APP = window.APP || {};
     return { ok: problems.length === 0, problems: problems };
   }
 
-  /* ---------------------------------------------------------
-     Public config object
-     --------------------------------------------------------- */
   const config = {
     BACKEND_URL: BACKEND_URL,
     APP_NAME: APP_NAME,
@@ -338,7 +226,6 @@ window.APP = window.APP || {};
 
   window.APP.config = config;
 
-  // Friendly banner in the console (useful when debugging)
   try {
     console.log('%cTreasure Hunt ' + APP_VERSION, 'color:#1f9d55;font-weight:bold', 'frontend loaded');
   } catch (e) { /* no-op */ }
