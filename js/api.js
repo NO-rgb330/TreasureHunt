@@ -324,11 +324,27 @@ window.APP = window.APP || {};
     getStudentReport: function (studentId) {
       return call('teacher.getStudentReport', { studentId: studentId }, {});
     },
-    getReports:       function (params) {
+       getReports:       function (params) {
       params = params || {};
       return call('teacher.getReports', {
         classId: params.classId || '',
         huntId:  params.huntId  || ''
+      }, {});
+    },
+    /**
+     * getSubmissions — read-only list of quiz submissions visible
+     * to the calling teacher (or any class for admins).
+     *
+     * params: { classId?, huntId?, status? ('all'|'passed'|'failed'|'pending'), limit? }
+     * returns: { rows:[...], filtered:{...}, total:<number> }
+     */
+    getSubmissions:   function (params) {
+      params = params || {};
+      return call('teacher.getSubmissions', {
+        classId: params.classId || '',
+        huntId:  params.huntId  || '',
+        status:  params.status  || 'all',
+        limit:   Number(params.limit) || 200
       }, {});
     },
     getAudit:         function (limit) {
