@@ -6,41 +6,46 @@
      teacher.hunts       → renderTeacherHunts
      teacher.challenges  → renderTeacherChallenges
 
-   Part 2 (appended below in the same file) registers:
+   Part 2 (second IIFE, appended to this same file) registers:
      teacher.quizManager → renderTeacherQuizManager
      teacher.students    → renderTeacherStudents
      teacher.reports     → renderTeacherReports
+                           (includes submissions filter + table)
      teacher.integrations→ renderTeacherIntegrations
      teacher.settings    → renderTeacherSettings
 
-   Shared conventions used here and in Part 2:
-     - APP.api.teacher.*         (all teacher API calls)
-     - APP.ui.showModal/confirm/alert/toast/el/formatDate
-     - ctx.onCleanup(fn)         (view teardown — currently unused here,
-                                  but kept for symmetry with other views)
-     - Deep-link params via ctx.params.* from the hash router
+   Shared conventions:
+     - APP.api.teacher.*          all teacher API calls
+     - APP.ui.showModal/confirm/  modal + confirm + toast + el helpers
+       alert/toast/el/formatDate
+     - ctx.onCleanup(fn)          view teardown hook (called on
+                                  route change and on logout)
+     - ctx.params.*               deep-link params from hash router
 
    Backend contract (see backend/Code.gs):
      teacher.getOverview()          → { stats:{ students, hunts,
-                                              challenges, totalPointsAwarded,
+                                              challenges,
+                                              totalPointsAwarded,
                                               submissions } }
      teacher.getHunts()             → [{ huntId, name, description,
-                                         instructions, startDate, endDate,
-                                         status, published, assignedClassIds,
+                                         instructions, startDate,
+                                         endDate, status, published,
+                                         assignedClassIds,
                                          challengeCount, createdBy }]
      teacher.getChallenges(huntId)  → [{ challengeId, huntId, name,
                                          description, qrToken, quizId,
-                                         formUrl, maxPoints, passingPercent,
-                                         startDate, endDate, status,
+                                         formUrl, maxPoints,
+                                         passingPercent, startDate,
+                                         endDate, status,
                                          assignedClassIds, orderIndex }]
      teacher.createHunt(payload)    → { huntId }
      teacher.updateHunt(payload)    → { ok }
-     teacher.deleteHunt(huntId)     → { ok }   (archives: status=archived)
+     teacher.deleteHunt(huntId)     → { ok }   (archives)
      teacher.updateChallenge(p)     → { ok }
      teacher.regenerateToken(id)    → { qrToken }
      teacher.disableChallenge(id)   → { ok }
-     teacher.getQuizzes()           → [{ quizId, title, questionCount, ... }]
-     teacher.getClasses()           → [{ classId, className }]
+     teacher.getQuizzes()           → [{ quizId, title, questionCount, … }]
+     teacher.getClasses()           → [{ classId, className, teacherIds }]
    ========================================================= */
 
 window.APP = window.APP || {};
@@ -128,6 +133,13 @@ window.APP.views = window.APP.views || {};
     return fmtDate(start) + ' \u2013 ' + fmtDate(end);
   }
 
+  function fieldRow(labelText, inputNode) {
+    const l = el('label');
+    l.appendChild(el('span', { textContent: labelText }));
+    l.appendChild(inputNode);
+    return l;
+  }
+
   /* ============================ SHARED COMPONENTS ============================ */
 
   function statCard(opts) {
@@ -166,10 +178,8 @@ window.APP.views = window.APP.views || {};
     if (message) box.appendChild(el('p', { textContent: message }));
     if (ctaLabel && typeof onCta === 'function') {
       box.appendChild(el('button', {
-        type: 'button',
-        className: 'btn btn-primary',
-        textContent: ctaLabel,
-        style: { marginTop: '12px' },
+        type: 'button', className: 'btn btn-primary',
+        textContent: ctaLabel, style: { marginTop: '12px' },
         onClick: onCta
       }));
     }
@@ -269,7 +279,7 @@ window.APP.views = window.APP.views || {};
     qaSection.appendChild(qaGrid);
     container.appendChild(qaSection);
 
-    /* ---- Recent submissions hint ---- */
+    /* ---- Tip card ---- */
     const tip = el('div', {
       className: 'card',
       style: { marginTop: '20px', background: '#eef1f5', borderStyle: 'dashed' }
@@ -277,7 +287,7 @@ window.APP.views = window.APP.views || {};
     const tipBody = el('div', { className: 'card-body', style: { fontSize: '.9rem', color: '#475569' } });
     tipBody.appendChild(el('strong', { textContent: 'Tip: ' }));
     tipBody.appendChild(document.createTextNode(
-      'Open the Reports view to see per-class and per-hunt performance, including completion rates and CSV export.'
+      'Open Reports to see per-class and per-hunt performance, including completion rates, submission status, and CSV export.'
     ));
     tip.appendChild(tipBody);
     container.appendChild(tip);
@@ -344,7 +354,6 @@ window.APP.views = window.APP.views || {};
       if (state.autoOpenNew) {
         state.autoOpenNew = false;
         openCreateModal();
-        // Clean the URL
         try { history.replaceState(null, '', '#teacher.hunts'); } catch (e) {}
         return;
       }
@@ -356,7 +365,6 @@ window.APP.views = window.APP.views || {};
       }
     }
 
-    /* ---------- Paint ---------- */
     function paint() {
       container.innerHTML = '';
 
@@ -422,7 +430,6 @@ window.APP.views = window.APP.views || {};
       state.hunts.forEach(function (h) {
         const tr = el('tr');
 
-        // Hunt name cell
         const nameTd = el('td');
         nameTd.appendChild(el('div', {
           style: { fontWeight: '600', color: '#0f2a44' },
@@ -483,13 +490,8 @@ window.APP.views = window.APP.views || {};
       container.appendChild(wrap);
     }
 
-    /* ---------- Create / Edit modal ---------- */
-    function openCreateModal() {
-      openHuntModal({}, 'Create treasure hunt', false);
-    }
-    function openEditModal(hunt) {
-      openHuntModal(hunt, 'Edit treasure hunt', true);
-    }
+    function openCreateModal() { openHuntModal({}, 'Create treasure hunt', false); }
+    function openEditModal(hunt) { openHuntModal(hunt, 'Edit treasure hunt', true); }
 
     function openHuntModal(initial, title, isEdit) {
       const classes = state.classes;
@@ -505,27 +507,20 @@ window.APP.views = window.APP.views || {};
 
       const form = el('form', { className: 'form' });
 
-      // Name
       const nameInput = el('input', {
-        type: 'text',
-        value: vals.name,
-        maxlength: '100',
-        placeholder: 'e.g. Science Week 2025',
-        required: 'required'
+        type: 'text', value: vals.name, maxlength: '100',
+        placeholder: 'e.g. Science Week 2025', required: 'required'
       });
       form.appendChild(fieldRow('Hunt name *', nameInput));
 
-      // Description
       const descInput = el('textarea', { rows: '2', placeholder: 'Short description shown to students' });
       descInput.value = vals.description;
       form.appendChild(fieldRow('Description', descInput));
 
-      // Instructions
       const instrInput = el('textarea', { rows: '2', placeholder: 'Instructions for students' });
       instrInput.value = vals.instructions;
       form.appendChild(fieldRow('Instructions', instrInput));
 
-      // Dates
       const datesRow = el('div', { className: 'form-row' });
       const startInput = el('input', { type: 'date', value: vals.startDate });
       datesRow.appendChild(fieldRow('Start date', startInput));
@@ -533,7 +528,6 @@ window.APP.views = window.APP.views || {};
       datesRow.appendChild(fieldRow('End date', endInput));
       form.appendChild(datesRow);
 
-      // Classes
       const classField = el('label');
       classField.appendChild(el('span', { textContent: 'Available to classes' }));
       const classList = el('div', { className: 'checkbox-list' });
@@ -563,7 +557,6 @@ window.APP.views = window.APP.views || {};
       }));
       form.appendChild(classField);
 
-      // Published
       const pubRow = el('div', { className: 'checkbox-row' });
       const pubCb = el('input', { type: 'checkbox' });
       pubCb.checked = vals.published;
@@ -574,15 +567,8 @@ window.APP.views = window.APP.views || {};
       }));
       form.appendChild(pubRow);
 
-      // Error area
       const errorEl = el('div', { className: 'error-text hidden' });
       form.appendChild(errorEl);
-
-      const saveBtn = el('button', {
-        type: 'submit',
-        className: 'btn btn-primary',
-        textContent: isEdit ? 'Save changes' : 'Create hunt'
-      });
 
       form.addEventListener('submit', function (e) {
         e.preventDefault();
@@ -602,9 +588,6 @@ window.APP.views = window.APP.views || {};
           return;
         }
 
-        saveBtn.disabled = true;
-        saveBtn.innerHTML = '<span class="spinner-sm"></span>Saving\u2026';
-
         const payload = {
           name: name,
           description: descInput.value || '',
@@ -615,8 +598,10 @@ window.APP.views = window.APP.views || {};
           published: pubCb.checked
         };
 
+        if (isEdit) payload.huntId = initial.huntId;
+
         const promise = isEdit
-          ? api().teacher.updateHunt(Object.assign({ huntId: initial.huntId }, payload))
+          ? api().teacher.updateHunt(payload)
           : api().teacher.createHunt(payload);
 
         promise.then(function () {
@@ -629,8 +614,6 @@ window.APP.views = window.APP.views || {};
           if (api().isAuthError && api().isAuthError(err)) return;
           errorEl.textContent = safeMsg(err);
           errorEl.classList.remove('hidden');
-          saveBtn.disabled = false;
-          saveBtn.textContent = isEdit ? 'Save changes' : 'Create hunt';
         });
       });
 
@@ -648,33 +631,20 @@ window.APP.views = window.APP.views || {};
               label: isEdit ? 'Save changes' : 'Create hunt',
               variant: 'primary',
               onClick: function () {
-                // Trigger form submit via the button inside the form
-                const evt = new Event('submit', { cancelable: true, bubbles: true });
-                form.dispatchEvent(evt);
+                form.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
               }
             }
           ]
         });
-        // Hide the "save" button inside the form since the modal footer has it
-        saveBtn.classList.add('hidden');
       } else {
-        // Fallback: no modal available
         container.insertBefore(body, container.firstChild);
       }
     }
 
-    function fieldRow(labelText, inputNode) {
-      const l = el('label');
-      l.appendChild(el('span', { textContent: labelText }));
-      l.appendChild(inputNode);
-      return l;
-    }
-
-    /* ---------- Archive ---------- */
     async function archiveHunt(hunt) {
       const ok = await confirmDialog(
         'Archive "' + (hunt.name || 'this hunt') + '"? Students will no longer see it, ' +
-        'but existing scores are kept. You cannot un-archive from this screen.',
+        'but existing scores are kept.',
         { title: 'Archive hunt?', confirmLabel: 'Archive', danger: true }
       );
       if (!ok) return;
@@ -690,17 +660,14 @@ window.APP.views = window.APP.views || {};
       }
     }
 
-    /* ---------- Initial paint + cleanup ---------- */
     paint();
     loadAll();
-
     ctx.onCleanup(function () { state.mounted = false; });
   }
 
   /* ============================ VIEW: teacher.challenges ============================ */
 
   async function renderTeacherChallenges(container, ctx) {
-    /* ---------- Local state ---------- */
     const state = {
       hunts: [],
       quizzes: [],
@@ -757,7 +724,6 @@ window.APP.views = window.APP.views || {};
       return h ? (h.name || 'Hunt') : '\u2014';
     }
 
-    /* ---------- Paint ---------- */
     function paint() {
       container.innerHTML = '';
 
@@ -789,7 +755,6 @@ window.APP.views = window.APP.views || {};
         })
       ]));
 
-      // Filter row
       const filterRow = el('div', { className: 'leaderboard-filter' });
       const huntSel = el('select', { 'aria-label': 'Filter by hunt' });
       huntSel.appendChild(el('option', { value: '', textContent: 'All hunts' }));
@@ -805,10 +770,8 @@ window.APP.views = window.APP.views || {};
       filterRow.appendChild(huntSel);
 
       const refreshBtn = el('button', {
-        type: 'button',
-        className: 'btn btn-outline btn-sm',
-        textContent: 'Refresh',
-        onClick: loadChallenges
+        type: 'button', className: 'btn btn-outline btn-sm',
+        textContent: 'Refresh', onClick: loadChallenges
       });
       filterRow.appendChild(refreshBtn);
       container.appendChild(filterRow);
@@ -877,27 +840,19 @@ window.APP.views = window.APP.views || {};
         });
 
         btnGroup.appendChild(el('button', {
-          type: 'button',
-          className: 'btn btn-outline btn-sm',
-          textContent: 'Edit',
+          type: 'button', className: 'btn btn-outline btn-sm', textContent: 'Edit',
           onClick: function () { openEditChallenge(c); }
         }));
         btnGroup.appendChild(el('button', {
-          type: 'button',
-          className: 'btn btn-outline btn-sm',
-          textContent: 'QR',
+          type: 'button', className: 'btn btn-outline btn-sm', textContent: 'QR',
           onClick: function () { ctx.navigate('teacher.qrGenerator'); }
         }));
         btnGroup.appendChild(el('button', {
-          type: 'button',
-          className: 'btn btn-outline btn-sm',
-          textContent: 'Regen',
+          type: 'button', className: 'btn btn-outline btn-sm', textContent: 'Regen',
           onClick: function () { regenerateToken(c); }
         }));
         btnGroup.appendChild(el('button', {
-          type: 'button',
-          className: 'btn btn-danger btn-sm',
-          textContent: 'Disable',
+          type: 'button', className: 'btn btn-danger btn-sm', textContent: 'Disable',
           onClick: function () { disableChallenge(c); }
         }));
 
@@ -911,7 +866,6 @@ window.APP.views = window.APP.views || {};
       container.appendChild(wrap);
     }
 
-    /* ---------- Edit challenge modal ---------- */
     function openEditChallenge(c) {
       const vals = {
         name: c.name || '',
@@ -935,7 +889,6 @@ window.APP.views = window.APP.views || {};
       descInput.value = vals.description;
       form.appendChild(fieldRow('Description', descInput));
 
-      // Quiz dropdown
       const quizSel = el('select');
       quizSel.appendChild(el('option', { value: '', textContent: 'None (no built-in quiz)' }));
       state.quizzes.forEach(function (q) {
@@ -949,9 +902,7 @@ window.APP.views = window.APP.views || {};
       form.appendChild(fieldRow('Built-in quiz', quizSel));
 
       const formUrlInput = el('input', {
-        type: 'url',
-        value: vals.formUrl,
-        placeholder: 'https://docs.google.com/forms/...'
+        type: 'url', value: vals.formUrl, placeholder: 'https://docs.google.com/forms/...'
       });
       const formUrlField = fieldRow('Google Form URL (optional)', formUrlInput);
       formUrlField.appendChild(el('div', {
@@ -1008,12 +959,13 @@ window.APP.views = window.APP.views || {};
       form.addEventListener('submit', function (e) {
         e.preventDefault();
         errorEl.classList.add('hidden');
+        errorEl.textContent = '';
 
         const name = nameInput.value.trim();
         if (!name) { errorEl.textContent = 'Name is required.'; errorEl.classList.remove('hidden'); return; }
         if (num(pointsInput.value) < 0) { errorEl.textContent = 'Points cannot be negative.'; errorEl.classList.remove('hidden'); return; }
         const pass = num(passingInput.value);
-        if (pass < 0 || pass > 100) { errorEl.textContent = 'Passing % must be 0–100.'; errorEl.classList.remove('hidden'); return; }
+        if (pass < 0 || pass > 100) { errorEl.textContent = 'Passing % must be 0\u2013100.'; errorEl.classList.remove('hidden'); return; }
         if (startInput.value && endInput.value &&
             new Date(startInput.value).getTime() > new Date(endInput.value).getTime()) {
           errorEl.textContent = 'End date must be after start date.';
@@ -1071,14 +1023,6 @@ window.APP.views = window.APP.views || {};
       }
     }
 
-    function fieldRow(labelText, inputNode) {
-      const l = el('label');
-      l.appendChild(el('span', { textContent: labelText }));
-      l.appendChild(inputNode);
-      return l;
-    }
-
-    /* ---------- Actions ---------- */
     async function regenerateToken(c) {
       const ok = await confirmDialog(
         'Regenerate QR token for "' + (c.name || 'this challenge') + '"? ' +
@@ -1116,10 +1060,8 @@ window.APP.views = window.APP.views || {};
       }
     }
 
-    /* ---------- Init + cleanup ---------- */
     paint();
     loadAll();
-
     ctx.onCleanup(function () { state.mounted = false; });
   }
 
@@ -1130,18 +1072,16 @@ window.APP.views = window.APP.views || {};
   window.APP.views.renderTeacherChallenges = renderTeacherChallenges;
 
   /* ============================================================
-     PART 2 CONTINUES IN THE SAME FILE (js/teacher.js):
+     PART 2 (second IIFE, appended to this file) registers:
 
        renderTeacherQuizManager
        renderTeacherStudents
-       renderTeacherReports
+       renderTeacherReports   ← includes submissions filter + table
        renderTeacherIntegrations
        renderTeacherSettings
 
-     They are registered in a second IIFE appended to this file
-     so that this part remains self-contained and valid on its own.
-     The five views above will show "Coming soon" (via app.js's
-     missing-view fallback) if Part 2 has not been appended yet.
+     Until Part 2 is appended, the five views above resolve to
+     app.js's "Coming soon" fallback. Nothing breaks.
      ============================================================ */
 })();
 
@@ -1157,18 +1097,18 @@ window.APP.views = window.APP.views || {};
      teacher.integrations → renderTeacherIntegrations
      teacher.settings     → renderTeacherSettings
 
-   Note: because IIFEs do not share scope, all small helpers
-   from Part 1 are re-declared here. They are identical in
-   behaviour but self-contained, so this second IIFE stays
-   valid independently.
+   Because IIFEs do not share scope, helpers from Part 1
+   are re-declared identically here. No behaviour drift.
 
    Backend contract:
      teacher.getQuizzes()          → [{ quizId, title, description,
                                         timeLimitMinutes, passingPercent,
                                         status, questionCount }]
-     teacher.getQuiz(quizId)       → { quiz:{...}, questions:[{ questionId,
-                                        type, text, options[], correctIndex,
-                                        explanation, marks, orderIndex }] }
+     teacher.getQuiz(quizId)       → { quiz:{...}, questions:[
+                                        { questionId, type, text,
+                                          options[], correctIndex,
+                                          explanation, marks,
+                                          orderIndex } ] }
      teacher.saveQuiz(payload)     → { quizId }
        payload: { quizId?, title, description, timeLimitMinutes,
                   passingPercent, questions:[{ type, text, options[],
@@ -1178,20 +1118,26 @@ window.APP.views = window.APP.views || {};
                                         classId, className, totalPoints,
                                         challengesCompleted }]
      teacher.getStudentReport(id)  → { student:{...}, totalPoints,
-                                        challenges:[...], submissions:[...] }
+                                        challenges:[...],
+                                        submissions:[...] }
      teacher.getReports({classId,
                           huntId}) → { students[], challengeStats[],
                                         summary:{ participatingStudents,
                                                   totalStudents,
                                                   totalPoints,
                                                   averagePoints } }
-     teacher.getHunts()            → [ { huntId, name, ... } ]
-     teacher.getClasses()          → [ { classId, className, teacherIds[] } ]
-
-   Known backend limitation (documented in SETUP.md):
-     There is no per-student "failed / pending submissions" endpoint.
-     The Reports view shows aggregates; raw rows live in the Google
-     Spreadsheet (QuizResults / ScoreTransactions sheets).
+     teacher.getSubmissions({classId, huntId, status, limit})
+                                   → { rows:[{ submissionId, studentId,
+                                        studentName, classId, className,
+                                        challengeId, challengeName,
+                                        huntName, score, maxScore,
+                                        percent, passed, gradingStatus,
+                                        submittedAt }],
+                                       filtered:{ classId, huntId,
+                                                   status },
+                                       total }
+     teacher.getHunts()            → [{ huntId, name, ... }]
+     teacher.getClasses()          → [{ classId, className, teacherIds[] }]
    ========================================================= */
 
 (function () {
@@ -1354,9 +1300,7 @@ window.APP.views = window.APP.views || {};
         try { URL.revokeObjectURL(url); a.remove(); } catch (e) {}
       }, 200);
       return true;
-    } catch (e) {
-      return false;
-    }
+    } catch (e) { return false; }
   }
 
   /* =========================================================
@@ -1498,7 +1442,7 @@ window.APP.views = window.APP.views || {};
       container.appendChild(wrap);
     }
 
-    /* ---------- Quiz editor (shared create/edit) ---------- */
+    /* ---------- Quiz editor ---------- */
     let qidCounter = 0;
     function newQid() { qidCounter += 1; return 'q' + qidCounter; }
 
@@ -1551,9 +1495,7 @@ window.APP.views = window.APP.views || {};
       };
     }
 
-    function openCreateQuiz() {
-      openQuizEditor(newEditorState(), false);
-    }
+    function openCreateQuiz() { openQuizEditor(newEditorState(), false); }
 
     async function openEditQuiz(quizId) {
       try {
@@ -1598,11 +1540,8 @@ window.APP.views = window.APP.views || {};
       (data.questions || []).forEach(function (q, i) {
         const card = el('div', {
           style: {
-            padding: '12px 14px',
-            border: '1px solid #e2e8f0',
-            borderRadius: '8px',
-            marginBottom: '8px',
-            background: '#f9fafc'
+            padding: '12px 14px', border: '1px solid #e2e8f0',
+            borderRadius: '8px', marginBottom: '8px', background: '#f9fafc'
           }
         });
         card.appendChild(el('div', {
@@ -1618,12 +1557,10 @@ window.APP.views = window.APP.views || {};
           const isCorrect = num(q.correctIndex) === oi;
           const row = el('div', {
             style: {
-              padding: '6px 10px',
-              borderRadius: '6px',
+              padding: '6px 10px', borderRadius: '6px',
               background: isCorrect ? '#e6f5ec' : 'transparent',
               color: isCorrect ? '#178a48' : '#475569',
-              fontWeight: isCorrect ? '600' : '400',
-              fontSize: '.9rem'
+              fontWeight: isCorrect ? '600' : '400', fontSize: '.9rem'
             }
           });
           row.textContent = (isCorrect ? '\u2713 ' : '\u25cb ') + String(opt || '(empty)');
@@ -1644,9 +1581,7 @@ window.APP.views = window.APP.views || {};
           title: 'Quiz preview',
           body: body,
           wide: true,
-          footer: [
-            { label: 'Close', variant: 'primary', onClick: function () { ui().closeModal(); } }
-          ]
+          footer: [{ label: 'Close', variant: 'primary', onClick: function () { ui().closeModal(); } }]
         });
       }
     }
@@ -1661,8 +1596,8 @@ window.APP.views = window.APP.views || {};
         const warn = el('div', {
           style: {
             padding: '10px 14px', marginBottom: '12px',
-            background: '#fdf6e3', border: '1px solid #f0dfa8', borderRadius: '8px',
-            fontSize: '.85rem', color: '#7a5a00'
+            background: '#fdf6e3', border: '1px solid #f0dfa8',
+            borderRadius: '8px', fontSize: '.85rem', color: '#7a5a00'
           }
         });
         warn.appendChild(el('strong', { textContent: 'Heads up: ' }));
@@ -1674,7 +1609,10 @@ window.APP.views = window.APP.views || {};
 
       // ---- Metadata ----
       const metaSection = el('div');
-      const titleInput = el('input', { type: 'text', value: editorState.title, maxlength: '100', placeholder: 'e.g. Science Lab Basics' });
+      const titleInput = el('input', {
+        type: 'text', value: editorState.title, maxlength: '100',
+        placeholder: 'e.g. Science Lab Basics'
+      });
       titleInput.addEventListener('input', function () { editorState.title = titleInput.value; });
       metaSection.appendChild(fieldRow('Title *', titleInput));
 
@@ -1695,11 +1633,8 @@ window.APP.views = window.APP.views || {};
       modalBody.appendChild(metaSection);
       modalBody.appendChild(el('div', { className: 'divider' }));
 
-      // ---- Questions ----
       modalBody.appendChild(el('div', {
-        className: 'section-title',
-        style: { marginBottom: '8px' },
-        textContent: 'Questions'
+        className: 'section-title', style: { marginBottom: '8px' }, textContent: 'Questions'
       }));
 
       const questionsContainer = el('div');
@@ -1733,7 +1668,6 @@ window.APP.views = window.APP.views || {};
           }
         });
 
-        // Header row
         const head = el('div', {
           style: { display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '8px', flexWrap: 'wrap' }
         });
@@ -1751,7 +1685,8 @@ window.APP.views = window.APP.views || {};
           if (q.type === 'tf') {
             q.options = ['True', 'False'];
             q.correctIndex = 0;
-          } else if (q.type === 'mc' && (q.options.length < 2 || (q.options[0] === 'True' && q.options[1] === 'False'))) {
+          } else if (q.type === 'mc' && (q.options.length < 2 ||
+                     (q.options[0] === 'True' && q.options[1] === 'False'))) {
             q.options = ['', ''];
             q.correctIndex = 0;
           }
@@ -1783,16 +1718,13 @@ window.APP.views = window.APP.views || {};
 
         card.appendChild(head);
 
-        // Question text
         const textInput = el('textarea', {
-          rows: '2', placeholder: 'Question text',
-          style: { marginBottom: '8px' }
+          rows: '2', placeholder: 'Question text', style: { marginBottom: '8px' }
         });
         textInput.value = q.text;
         textInput.addEventListener('input', function () { q.text = textInput.value; });
         card.appendChild(textInput);
 
-        // Options
         if (q.type === 'tf') {
           const tfRow = el('div', { style: { display: 'flex', gap: '12px', marginBottom: '8px' } });
           [0, 1].forEach(function (idx2) {
@@ -1856,9 +1788,6 @@ window.APP.views = window.APP.views || {};
             type: 'button', className: 'btn btn-outline btn-sm', textContent: '+ Add option',
             style: { marginTop: '4px' }
           });
-          addBtn.addEventListener('click', function () {
-            // Note: bound to the outer add-question button intentionally — no-op here.
-          });
           addOptBtn.addEventListener('click', function () {
             if (q.options.length >= 8) {
               toast('Maximum 8 options per question.', 'warn');
@@ -1870,9 +1799,9 @@ window.APP.views = window.APP.views || {};
           card.appendChild(addOptBtn);
         }
 
-        // Explanation
         const explInput = el('input', {
-          type: 'text', value: q.explanation, placeholder: 'Explanation shown after grading (optional)',
+          type: 'text', value: q.explanation,
+          placeholder: 'Explanation shown after grading (optional)',
           style: { marginTop: '8px' }
         });
         explInput.addEventListener('input', function () { q.explanation = explInput.value; });
@@ -1883,7 +1812,6 @@ window.APP.views = window.APP.views || {};
 
       rebuildQuestions();
 
-      /* ---------- Validation ---------- */
       function validate() {
         if (!String(editorState.title || '').trim()) return 'Quiz title is required.';
         if (!editorState.questions.length) return 'At least one question is required.';
@@ -1905,8 +1833,9 @@ window.APP.views = window.APP.views || {};
         return '';
       }
 
-      /* ---------- Save ---------- */
+      let isSaving = false;
       async function save() {
+        if (isSaving) return;
         errorEl.classList.add('hidden');
         errorEl.textContent = '';
         const err = validate();
@@ -1935,26 +1864,22 @@ window.APP.views = window.APP.views || {};
         };
         if (editorState.quizId) payload.quizId = editorState.quizId;
 
-        const saveBtn = modalBody.querySelector('[data-save-quiz-btn]');
-        if (saveBtn) { saveBtn.disabled = true; saveBtn.innerHTML = '<span class="spinner-sm"></span>Saving\u2026'; }
-
+        isSaving = true;
         try {
           await api().teacher.saveQuiz(payload);
+          if (!state.mounted) return;
           if (ui() && ui().closeModal) ui().closeModal();
           toast(isEdit ? 'Quiz updated.' : 'Quiz created.', 'success');
           loadQuizzes();
         } catch (e) {
+          if (!state.mounted) return;
           if (api().isAuthError && api().isAuthError(e)) return;
           errorEl.textContent = safeMsg(e);
           errorEl.classList.remove('hidden');
-          if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Save quiz'; }
+        } finally {
+          isSaving = false;
         }
       }
-
-      // Expose save btn marker inside modal body so save() can find it
-      const hiddenSaveMarker = el('span', { 'data-save-quiz-btn': '1' });
-      hiddenSaveMarker.style.display = 'none';
-      modalBody.appendChild(hiddenSaveMarker);
 
       if (ui() && ui().showModal) {
         ui().showModal({
@@ -1964,15 +1889,7 @@ window.APP.views = window.APP.views || {};
           closable: false,
           footer: [
             { label: 'Cancel', variant: 'outline', onClick: function () { ui().closeModal(); } },
-            {
-              label: 'Save quiz',
-              variant: 'primary',
-              onClick: function () {
-                const b = modalBody.querySelector('[data-save-quiz-btn]');
-                if (b) b.click();
-                save();
-              }
-            }
+            { label: 'Save quiz', variant: 'primary', onClick: save }
           ]
         });
       }
@@ -1996,7 +1913,6 @@ window.APP.views = window.APP.views || {};
       }
     }
 
-    /* ---------- Init ---------- */
     paint();
     loadQuizzes();
     ctx.onCleanup(function () { state.mounted = false; });
@@ -2072,7 +1988,6 @@ window.APP.views = window.APP.views || {};
         return;
       }
 
-      // Filters
       const filterRow = el('div', { className: 'leaderboard-filter' });
       const classSel = el('select', { 'aria-label': 'Filter by class' });
       classSel.appendChild(el('option', { value: '', textContent: 'All my classes' }));
@@ -2093,10 +2008,12 @@ window.APP.views = window.APP.views || {};
       searchInput.addEventListener('input', function () {
         state.filterText = String(searchInput.value || '');
         paint();
-        // Refocus after paint (paint recreates the input)
         setTimeout(function () {
           const next = container.querySelector('.leaderboard-filter input[type="text"]');
-          if (next) { next.focus(); try { next.setSelectionRange(next.value.length, next.value.length); } catch (e) {} }
+          if (next) {
+            next.focus();
+            try { next.setSelectionRange(next.value.length, next.value.length); } catch (e) {}
+          }
         }, 0);
       });
       filterRow.appendChild(searchInput);
@@ -2118,7 +2035,6 @@ window.APP.views = window.APP.views || {};
         return;
       }
 
-      // Cap at 500 for renderer safety
       const MAX = 500;
       const shown = rows.slice(0, MAX);
 
@@ -2193,9 +2109,7 @@ window.APP.views = window.APP.views || {};
           title: (student.displayName || 'Student') + (student.className ? ' \u00b7 ' + student.className : ''),
           body: body,
           wide: true,
-          footer: [
-            { label: 'Close', variant: 'primary', onClick: function () { ui().closeModal(); } }
-          ]
+          footer: [{ label: 'Close', variant: 'primary', onClick: function () { ui().closeModal(); } }]
         });
       }
 
@@ -2215,19 +2129,16 @@ window.APP.views = window.APP.views || {};
     function buildStudentReport(r) {
       const wrap = el('div');
 
-      // Summary
       const sum = el('div', {
         className: 'stat-grid',
         style: { gridTemplateColumns: 'repeat(2, minmax(0,1fr))', marginBottom: '16px' }
       });
       sum.appendChild(statCard({ label: 'Total Points', value: num(r.totalPoints), accent: true }));
       sum.appendChild(statCard({
-        label: 'Challenges Completed',
-        value: String((r.challenges || []).length)
+        label: 'Challenges Completed', value: String((r.challenges || []).length)
       }));
       wrap.appendChild(sum);
 
-      // Challenges
       wrap.appendChild(el('div', { className: 'section-title', textContent: 'Completed challenges' }));
       if (!(r.challenges || []).length) {
         wrap.appendChild(el('p', { className: 'muted', textContent: 'No challenges completed yet.' }));
@@ -2247,11 +2158,8 @@ window.APP.views = window.APP.views || {};
         wrap.appendChild(list);
       }
 
-      // Submissions
       wrap.appendChild(el('div', {
-        className: 'section-title',
-        style: { marginTop: '20px' },
-        textContent: 'Quiz submissions'
+        className: 'section-title', style: { marginTop: '20px' }, textContent: 'Quiz submissions'
       }));
       if (!(r.submissions || []).length) {
         wrap.appendChild(el('p', { className: 'muted', textContent: 'No quiz submissions yet.' }));
@@ -2269,9 +2177,12 @@ window.APP.views = window.APP.views || {};
         r.submissions.forEach(function (s) {
           const tr = el('tr');
           tr.appendChild(el('td', { textContent: num(s.score) + ' / ' + num(s.maxScore) }));
-          tr.appendChild(el('td', {
-            innerHTML: '<span class="badge ' + (s.passed ? 'badge-green' : 'badge-red') + '">' + (s.passed ? 'Passed' : 'Failed') + '</span>'
+          const resTd = el('td');
+          resTd.appendChild(el('span', {
+            className: 'badge ' + (s.passed ? 'badge-green' : 'badge-red'),
+            textContent: s.passed ? 'Passed' : 'Failed'
           }));
+          tr.appendChild(resTd);
           tr.appendChild(el('td', { className: 'muted', textContent: fmtDateTime(s.submittedAt) }));
           tb.appendChild(tr);
         });
@@ -2298,7 +2209,9 @@ window.APP.views = window.APP.views || {};
       classes: [],
       filterClassId: '',
       filterHuntId: '',
+      filterStatus: 'all',        // 'all' | 'passed' | 'failed' | 'pending'
       report: null,
+      submissions: [],            // from teacher.getSubmissions
       isLoadingRefs: true,
       isLoadingReport: false,
       loadError: '',
@@ -2334,12 +2247,22 @@ window.APP.views = window.APP.views || {};
       state.reportError = '';
       paint();
       try {
-        const data = await api().teacher.getReports({
-          classId: state.filterClassId,
-          huntId: state.filterHuntId
-        });
+        // Fire both calls in parallel: reports + submissions.
+        const results = await Promise.all([
+          api().teacher.getReports({
+            classId: state.filterClassId,
+            huntId: state.filterHuntId
+          }),
+          api().teacher.getSubmissions({
+            classId: state.filterClassId,
+            huntId:  state.filterHuntId,
+            status:  state.filterStatus,
+            limit:   200
+          })
+        ]);
         if (!state.mounted) return;
-        state.report = data || null;
+        state.report = results[0] || null;
+        state.submissions = (results[1] && Array.isArray(results[1].rows)) ? results[1].rows : [];
         state.isLoadingReport = false;
         paint();
       } catch (err) {
@@ -2366,7 +2289,6 @@ window.APP.views = window.APP.views || {};
         return;
       }
 
-      // Filters
       const filterRow = el('div', { className: 'leaderboard-filter' });
 
       const classSel = el('select', { 'aria-label': 'Filter by class' });
@@ -2395,6 +2317,23 @@ window.APP.views = window.APP.views || {};
       });
       filterRow.appendChild(huntSel);
 
+      const statusSel = el('select', { 'aria-label': 'Filter by submission status' });
+      [
+        ['all',     'All submissions'],
+        ['passed',  'Passed only'],
+        ['failed',  'Failed only'],
+        ['pending', 'Pending only']
+      ].forEach(function (opt) {
+        const o = el('option', { value: opt[0], textContent: opt[1] });
+        if (opt[0] === state.filterStatus) o.selected = true;
+        statusSel.appendChild(o);
+      });
+      statusSel.addEventListener('change', function () {
+        state.filterStatus = String(statusSel.value || 'all');
+        loadReport();
+      });
+      filterRow.appendChild(statusSel);
+
       const refreshBtn = el('button', {
         type: 'button', className: 'btn btn-outline btn-sm', textContent: 'Refresh',
         disabled: state.isLoadingReport,
@@ -2403,16 +2342,14 @@ window.APP.views = window.APP.views || {};
       filterRow.appendChild(refreshBtn);
 
       if (state.report && !state.isLoadingReport) {
-        const dlStudentsBtn = el('button', {
+        filterRow.appendChild(el('button', {
           type: 'button', className: 'btn btn-outline btn-sm', textContent: 'Download scores CSV',
-          onClick: function () { downloadStudentsCsv(); }
-        });
-        const dlStatsBtn = el('button', {
+          onClick: downloadStudentsCsv
+        }));
+        filterRow.appendChild(el('button', {
           type: 'button', className: 'btn btn-outline btn-sm', textContent: 'Download stats CSV',
-          onClick: function () { downloadStatsCsv(); }
-        });
-        filterRow.appendChild(dlStudentsBtn);
-        filterRow.appendChild(dlStatsBtn);
+          onClick: downloadStatsCsv
+        }));
       }
 
       container.appendChild(filterRow);
@@ -2426,7 +2363,7 @@ window.APP.views = window.APP.views || {};
 
       const r = state.report;
 
-      // Summary
+      // ---- Summary ----
       const sum = el('div', { className: 'stat-grid' });
       sum.appendChild(statCard({
         label: 'Participating Students',
@@ -2449,7 +2386,7 @@ window.APP.views = window.APP.views || {};
       }));
       container.appendChild(sum);
 
-      // Students table
+      // ---- Students table ----
       container.appendChild(el('div', {
         className: 'section-title', style: { marginTop: '20px' }, textContent: 'Student scores'
       }));
@@ -2489,7 +2426,7 @@ window.APP.views = window.APP.views || {};
         container.appendChild(wrap);
       }
 
-      // Challenge stats table
+      // ---- Challenge stats table ----
       container.appendChild(el('div', {
         className: 'section-title', style: { marginTop: '20px' }, textContent: 'Challenge completion rates'
       }));
@@ -2517,12 +2454,13 @@ window.APP.views = window.APP.views || {};
             textContent: num(c.completedBy) + ' / ' + num(c.totalStudents)
           }));
           const rate = num(c.completionRate);
-          tr.appendChild(el('td', {
-            className: 'numeric',
-            innerHTML: '<span class="badge ' +
-              (rate >= 75 ? 'badge-green' : rate >= 40 ? 'badge-gold' : 'badge-grey') +
-              '">' + rate + '%</span>'
+          const rateTd = el('td', { className: 'numeric' });
+          rateTd.appendChild(el('span', {
+            className: 'badge ' +
+              (rate >= 75 ? 'badge-green' : rate >= 40 ? 'badge-gold' : 'badge-grey'),
+            textContent: rate + '%'
           }));
+          tr.appendChild(rateTd);
           tb.appendChild(tr);
         });
         t.appendChild(tb);
@@ -2530,14 +2468,101 @@ window.APP.views = window.APP.views || {};
         container.appendChild(wrap);
       }
 
-      // Footnote about failures/pending
-      const note = el('p', {
+      // ---- Recent submissions ----
+      container.appendChild(el('div', {
+        className: 'section-title', style: { marginTop: '20px' }, textContent: 'Recent submissions'
+      }));
+
+      if (!state.submissions.length) {
+        const emptyNote = state.filterStatus === 'all'
+          ? 'No submissions match the current filters.'
+          : 'No ' + state.filterStatus + ' submissions match the current filters.';
+        container.appendChild(el('p', { className: 'muted', textContent: emptyNote }));
+      } else {
+        const swrap = el('div', { className: 'table-wrap' });
+        const st = el('table');
+        const sth = el('thead');
+        const shrow = el('tr');
+        shrow.appendChild(el('th', { textContent: 'Student' }));
+        shrow.appendChild(el('th', { textContent: 'Challenge' }));
+        shrow.appendChild(el('th', { textContent: 'Score', className: 'numeric' }));
+        shrow.appendChild(el('th', { textContent: 'Result' }));
+        shrow.appendChild(el('th', { textContent: 'When' }));
+        sth.appendChild(shrow);
+        st.appendChild(sth);
+        const stb = el('tbody');
+        state.submissions.forEach(function (s) {
+          const tr = el('tr');
+
+          const sName = el('td');
+          sName.appendChild(el('div', {
+            style: { fontWeight: '600', color: '#0f2a44' },
+            textContent: s.studentName || 'Student'
+          }));
+          if (s.className) {
+            sName.appendChild(el('div', {
+              className: 'muted', style: { fontSize: '.78rem', marginTop: '2px' },
+              textContent: s.className
+            }));
+          }
+          tr.appendChild(sName);
+
+          const chName = el('td');
+          chName.appendChild(el('div', { textContent: s.challengeName || 'Challenge' }));
+          if (s.huntName) {
+            chName.appendChild(el('div', {
+              className: 'muted', style: { fontSize: '.78rem', marginTop: '2px' },
+              textContent: s.huntName
+            }));
+          }
+          tr.appendChild(chName);
+
+          tr.appendChild(el('td', {
+            className: 'numeric',
+            textContent: num(s.score) + ' / ' + num(s.maxScore) +
+              (s.percent != null ? ' (' + num(s.percent) + '%)' : '')
+          }));
+
+          const resultTd = el('td');
+          const gr = String(s.gradingStatus || '').toLowerCase();
+          if (gr && gr !== 'graded') {
+            resultTd.appendChild(el('span', { className: 'badge badge-gold', textContent: 'Pending' }));
+          } else {
+            resultTd.appendChild(el('span', {
+              className: 'badge ' + (s.passed ? 'badge-green' : 'badge-red'),
+              textContent: s.passed ? 'Passed' : 'Failed'
+            }));
+          }
+          tr.appendChild(resultTd);
+
+          tr.appendChild(el('td', {
+            className: 'muted',
+            style: { fontSize: '.82rem' },
+            textContent: fmtDateTime(s.submittedAt)
+          }));
+
+          stb.appendChild(tr);
+        });
+        st.appendChild(stb);
+        swrap.appendChild(st);
+        container.appendChild(swrap);
+
+        if (state.submissions.length >= 200) {
+          container.appendChild(el('p', {
+            className: 'muted',
+            style: { fontSize: '.78rem', marginTop: '6px', textAlign: 'center' },
+            textContent: 'Showing the 200 most recent submissions. Narrow the filters to see older ones.'
+          }));
+        }
+      }
+
+      // ---- Footnote ----
+      container.appendChild(el('p', {
         className: 'muted',
         style: { fontSize: '.82rem', marginTop: '16px' },
-        textContent: 'Failed and pending submissions are visible in the Google Spreadsheet (QuizResults sheet). ' +
-          'This view shows verified scores only.'
-      });
-      container.appendChild(note);
+        textContent: 'Full answer sheets and per-question records live in the Google Spreadsheet ' +
+          '(QuizResults and ScoreTransactions sheets).'
+      }));
     }
 
     function downloadStudentsCsv() {
@@ -2591,8 +2616,7 @@ window.APP.views = window.APP.views || {};
     backendCard.appendChild(bh);
     const bb = el('div', { className: 'card-body' });
     bb.appendChild(el('p', {
-      className: 'muted',
-      style: { fontSize: '.9rem' },
+      className: 'muted', style: { fontSize: '.9rem' },
       textContent: 'All requests are proxied through the Google Apps Script Web App configured in js/config.js.'
     }));
 
@@ -2638,20 +2662,17 @@ window.APP.views = window.APP.views || {};
     sheetsCard.appendChild(sh);
     const sb = el('div', { className: 'card-body' });
     sb.appendChild(el('p', {
-      className: 'muted',
-      style: { fontSize: '.9rem' },
+      className: 'muted', style: { fontSize: '.9rem' },
       textContent: 'Student scores, quiz results, and audit logs live in the school\u2019s shared spreadsheet. ' +
         'Teachers with access can open it in Google Sheets to see raw rows.'
     }));
     sb.appendChild(el('p', {
-      className: 'muted',
-      style: { fontSize: '.82rem', marginTop: '8px' },
+      className: 'muted', style: { fontSize: '.82rem', marginTop: '8px' },
       textContent: 'The spreadsheet ID is configured in Google Apps Script \u2192 Project Settings \u2192 Script Properties. ' +
         'Ask your administrator if you need access.'
     }));
     sb.appendChild(el('p', {
-      className: 'muted',
-      style: { fontSize: '.82rem' },
+      className: 'muted', style: { fontSize: '.82rem' },
       innerHTML: 'See <strong>SETUP.md</strong> for the full deployment guide and the sheet layout.'
     }));
     sheetsCard.appendChild(sb);
@@ -2664,23 +2685,19 @@ window.APP.views = window.APP.views || {};
     formsCard.appendChild(fh);
     const fb = el('div', { className: 'card-body' });
     fb.appendChild(el('p', {
-      className: 'muted',
-      style: { fontSize: '.9rem' },
+      className: 'muted', style: { fontSize: '.9rem' },
       textContent: 'Challenges may link an external Google Form for activities the built-in quiz can\u2019t express.'
     }));
-    fb.appendChild(el('ul', {
-      style: { fontSize: '.88rem', color: '#475569', paddingLeft: '20px', marginTop: '8px' }
-    }, [
-      el('li', { textContent: 'The form opens in a new tab. Points are NOT awarded automatically.' }),
-      el('li', { textContent: 'Teachers review responses in the response spreadsheet and award points through the challenge editor.' }),
-      el('li', { textContent: 'Built-in quizzes remain the recommended path for immediate scoring.' })
-    ]));
+    const ul = el('ul', { style: { fontSize: '.88rem', color: '#475569', paddingLeft: '20px', marginTop: '8px' } });
+    ul.appendChild(el('li', { textContent: 'The form opens in a new tab. Points are NOT awarded automatically.' }));
+    ul.appendChild(el('li', { textContent: 'Teachers review responses in the response spreadsheet and award points through the challenge editor.' }));
+    ul.appendChild(el('li', { textContent: 'Built-in quizzes remain the recommended path for immediate scoring.' }));
+    fb.appendChild(ul);
     formsCard.appendChild(fb);
     grid.appendChild(formsCard);
 
     container.appendChild(grid);
 
-    // Footer note
     container.appendChild(el('p', {
       className: 'muted',
       style: { fontSize: '.82rem', marginTop: '20px' },
