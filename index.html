@@ -1,1 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>Treasure Hunt</title>
+  <link rel="stylesheet" href="css/style.css" />
+  <link rel="stylesheet" href="css/responsive.css" />
+  <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
+  <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+</head>
+<body>
+  <div id="app-loading" class="fullscreen-center">
+    <div class="spinner"></div>
+    <p>Loading Treasure Hunt…</p>
+  </div>
 
+  <div id="login-screen" class="fullscreen-center hidden">
+    <div class="login-card">
+      <div class="brand-large">
+        <svg viewBox="0 0 24 24" width="40" height="40" aria-hidden="true">
+          <path fill="currentColor" d="M4 10h16v9a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-9zm0-2V5a1 1 0 0 1 1-1h14a1 1 0 0 1 1 1v3H4zm5 4v2h6v-2H9z"/>
+        </svg>
+        <h1>TREASURE HUNT</h1>
+      </div>
+      <p class="muted">Sign in to your school account</p>
+      <form id="login-form" class="form">
+        <label>
+          <span>School email</span>
+          <input type="email" id="login-email" autocomplete="username" required />
+        </label>
+        <label>
+          <span>Password</span>
+          <input type="password" id="login-password" autocomplete="current-password" required />
+        </label>
+        <button type="submit" class="btn btn-primary btn-block">Sign in</button>
+        <div id="login-error" class="error-text hidden"></div>
+      </form>
+    </div>
+  </div>
+
+  <div id="app" class="app-shell hidden">
+    <aside id="sidebar" class="sidebar">
+      <div class="sidebar-header">
+        <div class="brand">
+          <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">
+            <path fill="currentColor" d="M4 10h16v9a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-9zm0-2V5a1 1 0 0 1 1-1h14a1 1 0 0 1 1 1v3H4zm5 4v2h6v-2H9z"/>
+          </svg>
+          <span>TREASURE HUNT</span>
+        </div>
+        <button id="sidebar-close" class="icon-btn only-mobile" aria-label="Close menu">×</button>
+      </div>
+      <nav id="nav" class="nav"></nav>
+      <div class="sidebar-footer">
+        <div class="user-chip">
+          <div id="user-avatar" class="avatar">S</div>
+          <div class="user-meta">
+            <div id="user-name" class="user-name">…</div>
+            <div id="user-role" class="user-role">…</div>
+          </div>
+        </div>
+        <button id="logout-btn" class="btn btn-ghost btn-block">Sign out</button>
+      </div>
+    </aside>
+
+    <div class="main-wrap">
+      <header class="topbar">
+        <button id="menu-toggle" class="icon-btn only-mobile" aria-label="Open menu">☰</button>
+        <h2 id="page-title" class="page-title">Home</h2>
+        <div class="topbar-right">
+          <span id="role-badge" class="role-badge">…</span>
+        </div>
+      </header>
+
+      <main id="view" class="view"></main>
+    </div>
+  </div>
+
+  <div id="toast-container" class="toast-container"></div>
+  <div id="modal-backdrop" class="modal-backdrop hidden">
+    <div id="modal" class="modal"></div>
+  </div>
+
+  <script src="js/config.js"></script>
+  <script src="js/api.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/dashboard.js"></script>
+  <script src="js/qr-scanner.js"></script>
+  <script src="js/qr-generator.js"></script>
+  <script src="js/quizzes.js"></script>
+  <script src="js/leaderboard.js"></script>
+  <script src="js/teacher.js"></script>
+  <script src="js/admin.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
