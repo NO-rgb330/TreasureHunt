@@ -28,7 +28,7 @@ window.APP = window.APP || {};
      Must end with /exec (NOT /dev).
      See SETUP.md for how to obtain it.
      --------------------------------------------------------- */
-  const BACKEND_URL = 'const BACKEND_URL = https://script.google.com/macros/s/AKfycbwD8zQW7FrDy0J3P07riIMiE8msPNCpoMz2bYfEVywDlO35cG4499xeSpjW1n8xULS27w/exec;
+  const BACKEND_URL = 'const BACKEND_URL = 'https://script.google.com/macros/s/AKfycbwD8zQW7FrDy0J3P07riIMiE8msPNCpoMz2bYfEVywDlO35cG4499xeSpjW1n8xULS27w/exec';
 
   /* ---------------------------------------------------------
      App identity
