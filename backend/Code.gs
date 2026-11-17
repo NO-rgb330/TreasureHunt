@@ -49,7 +49,9 @@ const HEADERS = {
   ScoreTransactions: ['TransactionID','StudentID','ChallengeID','PointsAwarded','TransactionTime','Reason','VerificationStatus'],
   Sessions: ['Token','UserID','Role','ExpiresAt','CreatedAt'],
   AuditLog: ['LogID','Timestamp','ActorID','ActorRole','Action','TargetRecord','Description'],
-  Settings: ['Key','Value']
+  Settings: ['Key','Value'],
+  Forms: ['FormID','Title','Description','FieldsJSON','Token','Status','RequireLogin','AllowMultiple','ConfirmMessage','CreatedBy','CreatedAt','UpdatedAt'],
+  FormResponses: ['ResponseID','FormID','SubmittedAt','UserID','UserName','AnswersJSON']
 };
 
 /* ============================ ENTRY POINTS ============================ */
@@ -74,12 +76,14 @@ function doPost(e) {
   if (!action) return out_({ ok: false, error: 'Missing action' });
 
   // Lightweight rate-limit keyed on token or email
-  const key = (payload.token || '') + '|' + (payload.email || '') + '|' + action;
-  if (!rateLimit_(key, CONFIG.RATE_LIMIT_PER_MINUTE, 60)) {
+  const isFormAction = action.indexOf('form.') === 0;
+  const key = (payload.token || '') + '|' + (payload.email || '') + '|' + action + '|' + (payload.formToken || '');
+  const limit = isFormAction ? 1200 : CONFIG.RATE_LIMIT_PER_MINUTE; // many students may scan one QR at once
+  if (!rateLimit_(key, limit, 60)) {
     return out_({ ok: false, error: 'Rate limit exceeded. Please wait a moment.' });
   }
 
-  const PUBLIC = ['login'];
+  const PUBLIC = ['login', 'form.getPublic', 'form.submit'];
   let session = null;
   if (!PUBLIC.includes(action)) {
     session = getSession_(payload.token);
@@ -154,6 +158,18 @@ function route_(action, payload, session) {
     case 'admin.assignTeacherToClass': return teacher_(session, 'admin', adminAssignTeacherToClass_, [payload, session]);
     case 'admin.getAudit': return teacher_(session, 'admin', adminGetAudit_, [payload, session]);
     case 'admin.getStats': return teacher_(session, 'admin', adminGetStats_, []);
+
+    /* ---- forms builder (admin) ---- */
+    case 'admin.getForms': return teacher_(session, 'admin', adminGetForms_, []);
+    case 'admin.saveForm': return teacher_(session, 'admin', adminSaveForm_, [payload, session]);
+    case 'admin.deleteForm': return teacher_(session, 'admin', adminDeleteForm_, [payload, session]);
+    case 'admin.regenerateFormToken': return teacher_(session, 'admin', adminRegenerateFormToken_, [payload, session]);
+    case 'admin.getFormResponses': return teacher_(session, 'admin', adminGetFormResponses_, [payload]);
+    case 'admin.deleteFormResponse': return teacher_(session, 'admin', adminDeleteFormResponse_, [payload, session]);
+
+    /* ---- forms (public: reachable by QR code, no login unless the form requires it) ---- */
+    case 'form.getPublic': return formGetPublic_(payload);
+    case 'form.submit': return formSubmit_(payload);
 
     default:
       throw new Error('Unknown action: ' + action);
@@ -1580,8 +1596,8 @@ function setup() {
     const admin = {
       TeacherID: newId_('t'),
       DisplayName: 'Administrator',
-      Email: 'admin@school.local',
-      PasswordHash: hashPwd_('ChangeMe123!', salt),
+      Email: 'admin@gmail.com',
+      PasswordHash: hashPwd_('123456', salt),
       PasswordSalt: salt,
       Role: 'admin',
       ClassIDs: '',
@@ -1592,6 +1608,335 @@ function setup() {
     Logger.log('Created initial admin: admin@school.local / ChangeMe123! — CHANGE THIS PASSWORD.');
   }
   Logger.log('Setup complete.');
+}
+
+
+/* =====================================================================
+   FORMS BUILDER
+   ---------------------------------------------------------------------
+   Admins build forms; each form gets an unguessable share token that is
+   embedded in a link / QR code:  <site>/?form=<token>
+   Anyone with the link can fill the form (no login) unless the admin
+   turns on "Require sign-in".
+   ===================================================================== */
+
+const FORM_TYPES = ['text', 'paragraph', 'number', 'email', 'date', 'choice', 'multi', 'dropdown', 'rating', 'heading'];
+const FORM_LIMITS = { MAX_FIELDS: 40, MAX_OPTIONS: 30, MAX_SHORT: 500, MAX_LONG: 1500, MAX_JSON: 45000 };
+
+/** Stop spreadsheet formula injection in cells we write directly. */
+function safeCell_(v) {
+  const s = String(v == null ? '' : v);
+  return /^[=+\-@]/.test(s) ? "'" + s : s;
+}
+
+function newFormToken_() {
+  return 'frm_' + Utilities.getUuid().replace(/-/g, '');
+}
+
+function deleteRowById_(name, idField, idVal) {
+  const sh = sh_(name);
+  const idCol = HEADERS[name].indexOf(idField);
+  const data = sh.getDataRange().getValues();
+  for (let r = 1; r < data.length; r++) {
+    if (String(data[r][idCol]) === String(idVal)) { sh.deleteRow(r + 1); return true; }
+  }
+  return false;
+}
+
+/** Validate + normalise the field list sent by the builder. */
+function sanitizeFormFields_(raw) {
+  if (!Array.isArray(raw)) throw new Error('fields must be a list');
+  if (raw.length > FORM_LIMITS.MAX_FIELDS) throw new Error('A form can have at most ' + FORM_LIMITS.MAX_FIELDS + ' fields');
+  const seen = {};
+  const out = [];
+  raw.forEach(function (f, i) {
+    f = f || {};
+    const type = String(f.type || '');
+    if (FORM_TYPES.indexOf(type) < 0) throw new Error('Field ' + (i + 1) + ': unknown type');
+    const label = String(f.label || '').trim().slice(0, 200);
+    if (!label) throw new Error('Field ' + (i + 1) + ' needs a label');
+    let id = String(f.id || '');
+    if (!/^f_[a-z0-9]{3,16}$/i.test(id) || seen[id]) id = 'f_' + Utilities.getUuid().replace(/-/g, '').slice(0, 8);
+    seen[id] = true;
+
+    const field = {
+      id: id, type: type, label: label,
+      help: String(f.help || '').trim().slice(0, 300),
+      required: type === 'heading' ? false : !!f.required
+    };
+    if (type === 'choice' || type === 'multi' || type === 'dropdown') {
+      const opts = [];
+      (Array.isArray(f.options) ? f.options : []).forEach(function (o) {
+        const t = String(o == null ? '' : o).trim().slice(0, 100);
+        if (t && opts.indexOf(t) < 0) opts.push(t);
+      });
+      if (!opts.length) throw new Error('"' + label + '" needs at least one option');
+      if (opts.length > FORM_LIMITS.MAX_OPTIONS) throw new Error('"' + label + '" has too many options');
+      field.options = opts;
+    }
+    if (type === 'rating') {
+      const n = Math.round(Number(f.scale));
+      field.scale = (n >= 3 && n <= 10) ? n : 5;
+    }
+    if (type === 'number') {
+      if (f.min !== '' && f.min != null && isFinite(Number(f.min))) field.min = Number(f.min);
+      if (f.max !== '' && f.max != null && isFinite(Number(f.max))) field.max = Number(f.max);
+    }
+    out.push(field);
+  });
+  if (!out.some(function (f) { return f.type !== 'heading'; })) throw new Error('Add at least one question');
+  return out;
+}
+
+function formFromRow_(r) {
+  return {
+    formId: r.FormID,
+    title: r.Title,
+    description: r.Description || '',
+    fields: parseJSON_(r.FieldsJSON, []),
+    token: r.Token,
+    status: String(r.Status || 'open').toLowerCase(),
+    requireLogin: truthy_(r.RequireLogin),
+    allowMultiple: truthy_(r.AllowMultiple),
+    confirmMessage: r.ConfirmMessage || '',
+    createdAt: r.CreatedAt,
+    updatedAt: r.UpdatedAt
+  };
+}
+
+/* ---------------------------- admin ---------------------------- */
+
+function adminGetForms_() {
+  const forms = findMany_('Forms', r => String(r.Status).toLowerCase() !== 'archived');
+  const counts = {};
+  readAll_('FormResponses').forEach(function (r) { counts[r.FormID] = (counts[r.FormID] || 0) + 1; });
+  return forms.map(function (r) {
+    const f = formFromRow_(r);
+    f.responseCount = counts[r.FormID] || 0;
+    f.fieldCount = f.fields.filter(x => x.type !== 'heading').length;
+    return f;
+  }).sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
+}
+
+function adminSaveForm_(payload, session) {
+  const title = String(payload.title || '').trim().slice(0, 150);
+  if (!title) throw new Error('Form title is required');
+  const fields = sanitizeFormFields_(payload.fields);
+  const fieldsJson = JSON.stringify(fields);
+  if (fieldsJson.length > FORM_LIMITS.MAX_JSON) throw new Error('This form is too large. Remove some questions or options.');
+  const status = String(payload.status || 'open').toLowerCase() === 'closed' ? 'closed' : 'open';
+  const vals = {
+    Title: safeCell_(title),
+    Description: safeCell_(String(payload.description || '').trim().slice(0, 1000)),
+    FieldsJSON: fieldsJson,
+    Status: status,
+    RequireLogin: !!payload.requireLogin,
+    AllowMultiple: !!payload.allowMultiple,
+    ConfirmMessage: safeCell_(String(payload.confirmMessage || '').trim().slice(0, 500)),
+    UpdatedAt: nowIso_()
+  };
+
+  if (payload.formId) {
+    const existing = findOne_('Forms', r => r.FormID === payload.formId);
+    if (!existing || String(existing.Status).toLowerCase() === 'archived') throw new Error('Form not found');
+    updateById_('Forms', 'FormID', payload.formId, vals);
+    logAudit_(session.userId, session.role, 'UPDATE_FORM', payload.formId, title);
+    return formFromRow_(findOne_('Forms', r => r.FormID === payload.formId));
+  }
+
+  const row = Object.assign({
+    FormID: newId_('form'),
+    Token: newFormToken_(),
+    CreatedBy: session.userId,
+    CreatedAt: nowIso_()
+  }, vals);
+  append_('Forms', row);
+  logAudit_(session.userId, session.role, 'CREATE_FORM', row.FormID, title);
+  return formFromRow_(findOne_('Forms', r => r.FormID === row.FormID));
+}
+
+function adminDeleteForm_(payload, session) {
+  const ok = updateById_('Forms', 'FormID', payload.formId, { Status: 'archived', UpdatedAt: nowIso_() });
+  if (!ok) throw new Error('Form not found');
+  logAudit_(session.userId, session.role, 'DELETE_FORM', payload.formId, '');
+  return { ok: true };
+}
+
+/** Invalidates the old link / printed QR codes and issues a new one. */
+function adminRegenerateFormToken_(payload, session) {
+  const token = newFormToken_();
+  const ok = updateById_('Forms', 'FormID', payload.formId, { Token: token, UpdatedAt: nowIso_() });
+  if (!ok) throw new Error('Form not found');
+  logAudit_(session.userId, session.role, 'REGENERATE_FORM_TOKEN', payload.formId, '');
+  return { token: token };
+}
+
+function adminGetFormResponses_(payload) {
+  const row = findOne_('Forms', r => r.FormID === payload.formId);
+  if (!row) throw new Error('Form not found');
+  const rows = findMany_('FormResponses', r => r.FormID === payload.formId)
+    .map(function (r) {
+      return {
+        responseId: r.ResponseID,
+        submittedAt: r.SubmittedAt,
+        userId: r.UserID || '',
+        userName: r.UserName || '',
+        answers: parseJSON_(r.AnswersJSON, {})
+      };
+    })
+    .sort((a, b) => String(b.submittedAt).localeCompare(String(a.submittedAt)));
+  return { form: formFromRow_(row), responses: rows };
+}
+
+function adminDeleteFormResponse_(payload, session) {
+  if (!deleteRowById_('FormResponses', 'ResponseID', payload.responseId)) throw new Error('Response not found');
+  logAudit_(session.userId, session.role, 'DELETE_FORM_RESPONSE', payload.responseId, '');
+  return { ok: true };
+}
+
+/* ---------------------------- public ---------------------------- */
+
+function findFormByToken_(token) {
+  token = String(token || '');
+  if (!/^frm_[a-f0-9]{32}$/.test(token)) return null;
+  const r = findOne_('Forms', x => x.Token === token);
+  if (!r || String(r.Status).toLowerCase() === 'archived') return null;
+  return r;
+}
+
+function userDisplayName_(session) {
+  if (!session) return '';
+  const t = findOne_('Teachers', r => r.TeacherID === session.userId);
+  if (t) return t.DisplayName || '';
+  const s = findOne_('Students', r => r.StudentID === session.userId);
+  return s ? (s.DisplayName || '') : '';
+}
+
+function hasResponded_(formId, userId) {
+  return !!findOne_('FormResponses', r => r.FormID === formId && String(r.UserID) === String(userId));
+}
+
+function formGetPublic_(payload) {
+  const row = findFormByToken_(payload.formToken);
+  if (!row) throw new Error('This form link is not valid. It may have been replaced or removed.');
+  const f = formFromRow_(row);
+  if (f.status !== 'open') return { state: 'closed', title: f.title };
+
+  const session = getSession_(payload.token);
+  if (f.requireLogin && !session) return { state: 'login', title: f.title, description: f.description };
+  if (f.requireLogin && !f.allowMultiple && hasResponded_(f.formId, session.userId)) {
+    return { state: 'already', title: f.title };
+  }
+  return {
+    state: 'open',
+    title: f.title,
+    description: f.description,
+    fields: f.fields,
+    requireLogin: f.requireLogin,
+    allowMultiple: f.allowMultiple,
+    respondent: session ? userDisplayName_(session) : ''
+  };
+}
+
+/** Validate answers against the form definition; returns a clean answers object. */
+function validateFormAnswers_(fields, raw) {
+  raw = (raw && typeof raw === 'object') ? raw : {};
+  const clean = {};
+  fields.forEach(function (f) {
+    if (f.type === 'heading') return;
+    let v = raw[f.id];
+    const isEmpty = v == null || v === '' || (Array.isArray(v) && !v.length);
+    if (isEmpty) {
+      if (f.required) throw new Error('"' + f.label + '" is required');
+      return;
+    }
+    switch (f.type) {
+      case 'text':
+        v = String(v).trim().slice(0, FORM_LIMITS.MAX_SHORT); break;
+      case 'paragraph':
+        v = String(v).trim().slice(0, FORM_LIMITS.MAX_LONG); break;
+      case 'email':
+        v = String(v).trim().slice(0, 200);
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)) throw new Error('"' + f.label + '" must be a valid email');
+        break;
+      case 'number': {
+        const n = Number(v);
+        if (!isFinite(n)) throw new Error('"' + f.label + '" must be a number');
+        if (f.min != null && n < f.min) throw new Error('"' + f.label + '" must be at least ' + f.min);
+        if (f.max != null && n > f.max) throw new Error('"' + f.label + '" must be at most ' + f.max);
+        v = n; break;
+      }
+      case 'date':
+        v = String(v);
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(v)) throw new Error('"' + f.label + '" must be a valid date');
+        break;
+      case 'choice':
+      case 'dropdown':
+        v = String(v);
+        if (f.options.indexOf(v) < 0) throw new Error('"' + f.label + '": invalid choice');
+        break;
+      case 'multi': {
+        const arr = (Array.isArray(v) ? v : [v]).map(String);
+        const uniq = [];
+        arr.forEach(function (x) {
+          if (f.options.indexOf(x) < 0) throw new Error('"' + f.label + '": invalid choice');
+          if (uniq.indexOf(x) < 0) uniq.push(x);
+        });
+        v = uniq; break;
+      }
+      case 'rating': {
+        const n = Math.round(Number(v));
+        if (!(n >= 1 && n <= (f.scale || 5))) throw new Error('"' + f.label + '": invalid rating');
+        v = n; break;
+      }
+    }
+    clean[f.id] = v;
+  });
+  return clean;
+}
+
+function formSubmit_(payload) {
+  const row = findFormByToken_(payload.formToken);
+  if (!row) throw new Error('This form link is not valid. It may have been replaced or removed.');
+  const f = formFromRow_(row);
+  if (f.status !== 'open') throw new Error('This form is closed and no longer accepting responses.');
+
+  const session = getSession_(payload.token);
+  if (f.requireLogin && !session) throw new Error('Please sign in to submit this form.');
+
+  if (!rateLimit_('formsub:' + f.formId, 1000, 60)) throw new Error('This form is very busy. Please try again in a moment.');
+
+  const answers = validateFormAnswers_(f.fields, payload.answers);
+  if (!Object.keys(answers).length) throw new Error('Please answer at least one question.');
+  const answersJson = JSON.stringify(answers);
+  if (answersJson.length > FORM_LIMITS.MAX_JSON) throw new Error('Your answers are too long.');
+
+  const submissionId = /^sub_[a-z0-9]{8,40}$/i.test(String(payload.submissionId || ''))
+    ? String(payload.submissionId) : newId_('resp');
+
+  const needLock = !!session && !f.allowMultiple;
+  const lock = LockService.getScriptLock();
+  if (needLock) lock.waitLock(15000);
+  try {
+    // Idempotent: a retried request returns success without duplicating.
+    if (findOne_('FormResponses', r => r.ResponseID === submissionId)) {
+      return { ok: true, message: f.confirmMessage };
+    }
+    if (needLock && hasResponded_(f.formId, session.userId)) {
+      throw new Error('You have already submitted this form.');
+    }
+    append_('FormResponses', {
+      ResponseID: submissionId,
+      FormID: f.formId,
+      SubmittedAt: nowIso_(),
+      UserID: session ? session.userId : '',
+      UserName: safeCell_(session ? userDisplayName_(session) : ''),
+      AnswersJSON: answersJson
+    });
+  } finally {
+    if (needLock) lock.releaseLock();
+  }
+  return { ok: true, message: f.confirmMessage };
 }
 
 
