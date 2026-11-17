@@ -1593,3 +1593,36 @@ function setup() {
   }
   Logger.log('Setup complete.');
 }
+
+
+/* ============================ ADMIN RESET (run from Editor) ============================ */
+
+/**
+ * Creates the default admin if missing, or resets its password/role/status.
+ * Run from the Apps Script editor, then log in with:
+ *   admin@school.local / ChangeMe123!
+ * Change the password right after logging in.
+ */
+function resetAdmin() {
+  // Make sure every sheet exists first (same as setup()).
+  Object.keys(HEADERS).forEach(n => sh_(n));
+  if (!readAll_('Classes').length) {
+    append_('Classes', { ClassID: 'cls_default', ClassName: 'Class A', TeacherIDs: '', CreatedAt: nowIso_() });
+  }
+
+  const salt = genSalt_();
+  const hash = hashPwd_('ChangeMe123!', salt);
+  const t = findOne_('Teachers', r => String(r.Email).trim().toLowerCase() === 'admin@school.local');
+  if (!t) {
+    append_('Teachers', {
+      TeacherID: newId_('t'), DisplayName: 'Administrator', Email: 'admin@school.local',
+      PasswordHash: hash, PasswordSalt: salt, Role: 'admin',
+      ClassIDs: '', Status: 'active', CreatedAt: nowIso_()
+    });
+  } else {
+    updateById_('Teachers', 'TeacherID', t.TeacherID, {
+      PasswordHash: hash, PasswordSalt: salt, Role: 'admin', Status: 'active'
+    });
+  }
+  Logger.log('Admin ready: admin@school.local / ChangeMe123!');
+}
