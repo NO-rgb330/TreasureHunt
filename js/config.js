@@ -7,7 +7,7 @@ window.APP = window.APP || {};
 (function () {
   'use strict';
 
-  const BACKEND_URL = 'https://script.google.com/macros/s/AKfyc...YOUR_ID_HERE.../exec'; // <-- Make sure your full URL is here between the single quotes
+  const BACKEND_URL = 'https://script.google.com/macros/s/AKfycbwoYwaF5JTcEK-0V4vbwUuyW-ad6FCjzC8OGj16KiBnty6nkxohLNIMkWmDlnsONiKGLg/exec'; // <-- Make sure your full URL is here between the single quotes
 
   const APP_NAME = 'Treasure Hunt';
   const APP_VERSION = '1.0.0';
