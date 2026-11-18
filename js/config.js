@@ -7,7 +7,7 @@ window.APP = window.APP || {};
 (function () {
   'use strict';
 
-  const BACKEND_URL = 'https://script.google.com/macros/s/AKfycbzN232tHcAy8eYa3E8_rsyHYQcWEr6fR4h57mVQ2fbyqRgtTtVV23fDbLBrWI5z84WrTQ/exec'; // <-- Make sure your full URL is here between the single quotes
+  const BACKEND_URL = 'https://script.google.com/macros/s/AKfycbwZfJKqhv6cCxExri1uhK7dYuCuz7uhajPGKkRxHCEKIqAXeaPc-uowBBz6X_ZhbUEa3g/exec'; // <-- Make sure your full URL is here between the single quotes
 
   const APP_NAME = 'Treasure Hunt';
   const APP_VERSION = '1.0.0';
